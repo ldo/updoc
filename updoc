@@ -6,8 +6,10 @@
 
 import sys
 import os
+import stat
 import enum
 import re
+import time
 import fnmatch
 import getopt
 import apsw as sqlite
@@ -94,13 +96,13 @@ def open_db(dbname, mode) :
             "  (\n"
             "    id integer primary key autoincrement,\n"
             "    comment varchar not null,\n"
-            "    timestamp integer not null\n"
+            "    timestamp double not null\n"
             "  )\n",
-            "create table file\n"
+            "create table files\n"
             "  (\n"
             "    snapshot_id integer not null,\n" # = snapshots.id
             "    path varchar not null,\n"
-            "    timestamp integer not null,\n"
+            "    timestamp double not null,\n"
             "    contents blob not null,\n"
             "    primary key (snapshot_id, path)\n"
             "  )\n",
@@ -237,7 +239,7 @@ def parse_wildcard(parent, child) :
         pat = "(?:.+\\/)*" + pat
     #end if
     return \
-        pat
+        re.compile("^" + pat + "$", re.DOTALL)
 #end parse_wildcard
 
 def parse_manifest(contents) :
@@ -294,6 +296,9 @@ def parse_manifest(contents) :
                 action = DEPEND_ACTION.from_keyword.get(keyword)
                 if action == None :
                     raise ValueError("unrecognized rule keyword “%s”" % keyword)
+                #end if
+                if any(item.startswith("/") for item in items) :
+                    raise ValueError("relative pathspecs only: “%s”" % line)
                 #end if
                 if len(items) < action.min_args + 1 :
                     raise ValueError("%s for %s" % (action.msg_required_args, keyword))
@@ -493,7 +498,123 @@ def cmd_showdepends(args, opts) :
     if first :
         sys.stdout.write("No dependency rules found.\n")
     #end if
+    db.close()
 #end cmd_showdepends
+
+def cmd_list(args, opts) :
+    dbname, = args
+    db = open_db(dbname, DB_OPEN.READONLY)
+    first = True
+    for id, comment, timestamp in db_iter \
+      (
+        db,
+        "select id, comment, timestamp from snapshots order by timestamp"
+      ) \
+    :
+        if first :
+            sys.stdout.write \
+              (
+                "id   when            comment\n"
+                "---  --------------  ----------------\n"
+              )
+            first = False
+        #end if
+        sys.stdout.write \
+          (
+                "%0.3d  %s  %s\n"
+            %
+                (id, time.strftime("%Y-%m-%d %H-%M-%S", time.localtime(round(timestamp))), comment)
+          )
+    #end for
+    if first :
+        sys.stdout.write("No saved snapshots found.\n")
+    #end if
+    db.close()
+#end cmd_list
+
+def cmd_save(args, opts) :
+    dbname, basedir = args
+    if not stat.S_ISDIR(os.lstat(basedir).st_mode) :
+        raise ValueError("not a directory: “%s”" % basedir)
+    #end if
+    message = opts.get("message", "")
+    db = open_db(dbname, DB_OPEN.READWRITE)
+    rules = list(parse_depends(db))
+    if len(rules) == 0 :
+        raise ValueError("no rules specifying what to save")
+    #end if
+    def get_files(dirname, basename) :
+        result = []
+        for item in os.listdir(dirname) :
+            childitem = os.path.join(dirname, item)
+            childname = os.path.join(basename, item)
+            info = os.lstat(childitem)
+            if stat.S_ISREG(info.st_mode) :
+                i = len(rules)
+                while True :
+                    if i == 0 :
+                        includeit = False
+                        break
+                    #end if
+                    i -= 1
+                    do_include, matching = rules[i]
+                    if matching.search(childname) != None :
+                        includeit = do_include
+                        break
+                    #end if
+                #end while
+                if includeit :
+                    result.append({"path" : childname, "timestamp" : info.st_mtime})
+                #end if
+            elif stat.S_ISDIR(info.st_mode) :
+                result.extend(get_files(childitem, childname))
+            #end if
+        #end for
+        return result
+    #end get_files
+    to_save = get_files(basedir, "")
+    sys.stdout.write("files to save: %s\n" % repr(to_save)) # debug
+    if len(to_save) == 0 :
+        raise ValueError("no matching files to save")
+    #end if
+    cu = db.cursor()
+    cu.execute("begin transaction")
+    snaptime = time.time()
+    cu.execute \
+      (
+            "insert into snapshots(comment, timestamp) values(%s, %s)"
+        %
+            (sqlite.format_sql_value(message), str(snaptime))
+      )
+    snapid, = list(db_iter
+      (
+        db,
+        "select last_insert_rowid()",
+        mapfn = lambda x : x[0]
+      ))
+    for item in to_save :
+        sys.stdout.write("save %s\n" % item["path"])
+        contents = open(os.path.join(basedir, item["path"]), "rb").read()
+        cu.execute \
+          (
+                "insert into files(snapshot_id, path, timestamp, contents) values(%d, %s, %s, %s)"
+            %
+                (
+                    snapid,
+                    sqlite.format_sql_value(item["path"]),
+                    str(item["timestamp"]),
+                    sqlite.format_sql_value(contents),
+                )
+          )
+    #end for
+    cu.execute("end transaction")
+    cu.close()
+    db.close()
+    sys.stdout.write \
+      (
+        "%d files saved in snapshot ID %d\n" % (len(to_save), snapid)
+      )
+#end cmd_save
 
 # more TBD
 
@@ -543,6 +664,26 @@ recognized_commands = \
                 "action" : cmd_showdepends,
                 "help_usage" : "«dbname»",
                 "help_descr" : "shows the current snapshot dependencies for «dbname»",
+            },
+
+        "list" :
+            {
+                "args" : 1,
+                "opts" : (),
+                "action" : cmd_list,
+                "help_usage" : "«dbname»",
+                "help_descr" : "lists currently-saved snapshots in «dbname»",
+            },
+
+        "save" :
+            {
+                "args" : 2,
+                "opts" : ("message=",),
+                "action" : cmd_save,
+                "help_usage" : "[--message=«message»] «dbname» «base_dir»",
+                "help_descr" :
+                    "saves a snapshot of files from «base_dir» into «dbname»"
+                    " according to its currently loaded dependency rules",
             },
 
         # more TBD
