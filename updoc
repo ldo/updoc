@@ -243,9 +243,8 @@ def parse_wildcard(parent, child) :
 #end parse_wildcard
 
 def parse_manifest(contents) :
-    # parses a string which has the format of the contents of a MANIFEST.in
-    # file. Returns a list of («include», «pattern») tuples where «include»
-    # is True to include a file if it matches «pattern», False to exclude it.
+    "parses a string which has the format of the contents of a MANIFEST.in" \
+    " file. Returns the tokenized filter rule text without further interpretation."
 
     def tokenize_line(s) :
         if "\t" in s :
