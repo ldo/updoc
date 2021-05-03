@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 #+
-# Tool to maintain versions of a set of one or more co-dependent files
+# Tool to maintain versions of a set of one or more related files
 # in an SQLite database.
 #-
 
@@ -33,15 +33,15 @@ def db_iter(conn, cmd, mapfn = lambda x : x) :
 #end db_iter
 
 class DIRKIND(enum.Enum) :
-    "how to interpret file/dir specs in dependency actions."
+    "how to interpret file/dir specs in filter rules."
     ROOT = 0 # interpret as spec relative to root dir
     HASDIR = 1 # specs consist of parent dir followed by one or more child specs
     EVERYWHERE = 2 # interpet as spec relative to root dir and all subdirs
     ISDIR = 3 # spec is itself a dir
 #end DIRKIND
 
-class DEPEND_ACTION(enum.Enum) :
-    "kinds of dependency actions."
+class RULE_ACTION(enum.Enum) :
+    "kinds of filter rules."
     INCLUDE = ("include", True, DIRKIND.ROOT, 0, None)
     EXCLUDE = ("exclude", False, DIRKIND.ROOT, 0, None)
     RECURSIVE_INCLUDE = \
@@ -83,8 +83,8 @@ class DEPEND_ACTION(enum.Enum) :
         return self.value[4]
     #end msg_required_args
 
-#end DEPEND_ACTION
-DEPEND_ACTION.from_keyword = dict((i.keyword, i) for i in DEPEND_ACTION)
+#end RULE_ACTION
+RULE_ACTION.from_keyword = dict((i.keyword, i) for i in RULE_ACTION)
 
 def open_db(dbname, mode) :
     "opens the specified database file and returns a new connection. mode is DB_OPEN value."
@@ -106,14 +106,14 @@ def open_db(dbname, mode) :
             "    contents blob not null,\n"
             "    primary key (snapshot_id, path)\n"
             "  )\n",
-            "create table depends_rule\n"
+            "create table filter_rule\n"
             "  (\n"
             "    ordering integer primary key not null,\n" # for ordering of rules
             "    action varchar not null\n"
             "  )\n",
-            "create table depends_item\n"
+            "create table filter_item\n"
             "  (\n"
-            "    rule_ordering integer not null,\n" # = depends_rule.depends_item
+            "    rule_ordering integer not null,\n" # = filter_rule.filter_item
             "    item_ordering integer not null,\n" # for ordering of items within rule
             "    pathspec varchar not null,\n"
             "    primary key(rule_ordering, item_ordering)\n"
@@ -293,7 +293,7 @@ def parse_manifest(contents) :
             items = tokenize_line(line)
             if len(items) != 0 :
                 keyword = items[0]
-                action = DEPEND_ACTION.from_keyword.get(keyword)
+                action = RULE_ACTION.from_keyword.get(keyword)
                 if action == None :
                     raise ValueError("unrecognized rule keyword “%s”" % keyword)
                 #end if
@@ -311,21 +311,21 @@ def parse_manifest(contents) :
         result
 #end parse_manifest
 
-def load_depends(db) :
-    "generator which loads the dependency rules from the database."
-    depends_iter = db_iter \
+def load_filters(db) :
+    "generator which loads the filter specs from the database."
+    rules_iter = db_iter \
       (
         db,
-        "select depends_rule.ordering, depends_item.item_ordering, depends_rule.action,"
-        " depends_item.pathspec from depends_rule left join depends_item on"
-        " depends_rule.ordering = depends_item.rule_ordering order by"
-        " depends_rule.ordering, depends_item.item_ordering"
+        "select filter_rule.ordering, filter_item.item_ordering, filter_rule.action,"
+        " filter_item.pathspec from filter_rule left join filter_item on"
+        " filter_rule.ordering = filter_item.rule_ordering order by"
+        " filter_rule.ordering, filter_item.item_ordering"
       )
     last_rule_index = None
     last_rule_action = None
     rule_items = None
     while True :
-        item = next(depends_iter, None)
+        item = next(rules_iter, None)
         if item != None :
             rule_index, item_index, rule_action, item_pathspec = item
         else :
@@ -346,13 +346,13 @@ def load_depends(db) :
             rule_items.append(item_pathspec)
         #end if
     #end while
-#end load_depends
+#end load_filters
 
-def parse_depends(db) :
-    "generator which loads and parses the dependency rules from the database," \
+def parse_filters(db) :
+    "generator which loads and parses the filter specs from the database," \
     " yielding («include_matching», «match_pattern») pairs in order."
-    for action, items in load_depends(db) :
-        action = DEPEND_ACTION.from_keyword[action]
+    for action, items in load_filters(db) :
+        action = RULE_ACTION.from_keyword[action]
         to_parse = \
             {
                 DIRKIND.ROOT : lambda item : ("", item),
@@ -367,7 +367,7 @@ def parse_depends(db) :
             yield (action.include_matching, parse_wildcard(*to_parse(item)))
         #end for
     #end for
-#end parse_depends
+#end parse_filters
 
 #+
 # Definitions of valid commands.
@@ -438,23 +438,23 @@ def cmd_init(args, opts) :
     db.close()
 #end cmd_init
 
-def cmd_setdepends(args, opts) :
-    dbname, dependsname = args
-    depends = parse_manifest(open(dependsname, "rt").read())
-    sys.stdout.write("parsed manifest = %s\n" % repr(depends)) # debug
+def cmd_setfilters(args, opts) :
+    dbname, filter_filename = args
+    filters = parse_manifest(open(filter_filename, "rt").read())
+    sys.stdout.write("parsed manifest = %s\n" % repr(filters)) # debug
     db = open_db(dbname, DB_OPEN.READWRITE)
     cu = db.cursor()
     cu.execute("begin transaction")
-    for table in ("depends_item", "depends_rule") :
+    for table in ("filter_item", "filter_rule") :
         cu.execute("delete from %s" % table)
     #end for
     rule_index = 0
-    for items in depends :
+    for items in filters :
         rule_index += 1
         action = items.pop(0)
         cu.execute \
           (
-                "insert into depends_rule(ordering, action) values(%d, %s)"
+                "insert into filter_rule(ordering, action) values(%d, %s)"
             %
                 (rule_index, sqlite.format_sql_value(action))
           )
@@ -463,7 +463,7 @@ def cmd_setdepends(args, opts) :
             item_index += 1
             cu.execute \
               (
-                    "insert into depends_item(rule_ordering, item_ordering, pathspec)"
+                    "insert into filter_item(rule_ordering, item_ordering, pathspec)"
                     " values (%d, %d, %s)"
                 %
                     (rule_index, item_index, sqlite.format_sql_value(item))
@@ -473,13 +473,13 @@ def cmd_setdepends(args, opts) :
     cu.execute("end transaction")
     cu.close()
     db.close()
-#end cmd_setdepends
+#end cmd_setfilters
 
-def cmd_showdepends(args, opts) :
+def cmd_showfilters(args, opts) :
     dbname, = args
     db = open_db(dbname, DB_OPEN.READONLY)
     first = True
-    for action, items in load_depends(db) :
+    for action, items in load_filters(db) :
         if first :
             sys.stdout.write \
               (
@@ -496,10 +496,10 @@ def cmd_showdepends(args, opts) :
           )
     #end for
     if first :
-        sys.stdout.write("No dependency rules found.\n")
+        sys.stdout.write("No filter rules found.\n")
     #end if
     db.close()
-#end cmd_showdepends
+#end cmd_showfilters
 
 def cmd_list(args, opts) :
     dbname, = args
@@ -539,7 +539,7 @@ def cmd_save(args, opts) :
     #end if
     message = opts.get("message", "")
     db = open_db(dbname, DB_OPEN.READWRITE)
-    rules = list(parse_depends(db))
+    rules = list(parse_filters(db))
     if len(rules) == 0 :
         raise ValueError("no rules specifying what to save")
     #end if
@@ -685,23 +685,23 @@ recognized_commands = \
                 "help_descr" : "initializes a snapshot database with the specified name",
             },
 
-        "setdepends" :
+        "setfilters" :
             {
                 "args" : 2,
                 "opts" : (),
-                "action" : cmd_setdepends,
-                "help_usage" : "«dbname» «depends»",
+                "action" : cmd_setfilters,
+                "help_usage" : "«dbname» «filters_file»",
                 "help_descr" :
-                    "parses «depends» and sets the dependencies for snapshot database «dbname»",
+                    "parses «filters_file» and sets the filters for snapshot database «dbname»",
             },
 
-        "showdepends" :
+        "showfilters" :
             {
                 "args" : 1,
                 "opts" : (),
-                "action" : cmd_showdepends,
+                "action" : cmd_showfilters,
                 "help_usage" : "«dbname»",
-                "help_descr" : "shows the current snapshot dependencies for «dbname»",
+                "help_descr" : "shows the current snapshot filters for «dbname»",
             },
 
         "list" :
@@ -721,7 +721,7 @@ recognized_commands = \
                 "help_usage" : "[--message=«message»] «dbname» «base_dir»",
                 "help_descr" :
                     "saves a snapshot of files from «base_dir» into «dbname»"
-                    " according to its currently loaded dependency rules",
+                    " according to its currently loaded filter rules",
             },
 
         "restore" :
