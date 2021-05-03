@@ -1,8 +1,7 @@
 #!/usr/bin/python3
 #+
-# Tool to maintain versions of a document and associated
-# dependent files. The saved history for a file named “«file»”
-# is in an SQLite database named “«file».ver”.
+# Tool to maintain versions of a set of one or more co-dependent files
+# in an SQLite database.
 #-
 
 import sys
@@ -16,8 +15,6 @@ import apsw as sqlite
 #+
 # Database stuff
 #-
-
-snap_suffix = ".ver"
 
 class DB_OPEN(enum.IntEnum) :
     "database opening modes."
@@ -387,11 +384,7 @@ def cmd_help(args, opts) :
 #end cmd_help
 
 def cmd_init(args, opts) :
-    docname, = args
-    if not os.path.isfile(docname) :
-        raise getopt.GetoptError("no such docfile “%s”" % docname)
-    #end if
-    dbname = docname + snap_suffix
+    dbname, = args
     if os.path.isfile(dbname) :
         raise getopt.GetoptError("versions file “%s” already exists" % dbname)
     #end if
@@ -400,10 +393,10 @@ def cmd_init(args, opts) :
 #end cmd_init
 
 def cmd_setdepends(args, opts) :
-    docname, dependsname = args
+    dbname, dependsname = args
     depends = parse_manifest(open(dependsname, "rt").read())
     sys.stdout.write("parsed manifest = %s\n" % repr(depends)) # debug
-    db = open_db(docname + snap_suffix, DB_OPEN.READWRITE)
+    db = open_db(dbname, DB_OPEN.READWRITE)
     cu = db.cursor()
     cu.execute("begin transaction")
     cu.execute("delete from depends_rule")
@@ -423,8 +416,8 @@ def cmd_setdepends(args, opts) :
 #end cmd_setdepends
 
 def cmd_showdepends(args, opts) :
-    docname, = args
-    db = open_db(docname + snap_suffix, DB_OPEN.READONLY)
+    dbname, = args
+    db = open_db(dbname, DB_OPEN.READONLY)
     first = True
     for index, include, pathspec in db_iter \
       (
@@ -475,8 +468,8 @@ recognized_commands = \
                 "args" : 1,
                 "opts" : (),
                 "action" : cmd_init,
-                "help_usage" : "«docname»",
-                "help_descr" : "initializes a snapshot database for the specified document",
+                "help_usage" : "«dbname»",
+                "help_descr" : "initializes a snapshot database with the specified name",
             },
 
         "setdepends" :
@@ -484,8 +477,9 @@ recognized_commands = \
                 "args" : 2,
                 "opts" : (),
                 "action" : cmd_setdepends,
-                "help_usage" : "«docname» «depends»",
-                "help_descr" : "parses «depends» and set the snapshot dependencies for «docname»",
+                "help_usage" : "«dbname» «depends»",
+                "help_descr" :
+                    "parses «depends» and sets the dependencies for snapshot database «dbname»",
             },
 
         "showdepends" :
@@ -493,8 +487,8 @@ recognized_commands = \
                 "args" : 1,
                 "opts" : (),
                 "action" : cmd_showdepends,
-                "help_usage" : "«docname»",
-                "help_descr" : "shows the current snapshot dependencies for «docname»",
+                "help_usage" : "«dbname»",
+                "help_descr" : "shows the current snapshot dependencies for «dbname»",
             },
 
         # more TBD
