@@ -36,8 +36,8 @@ class DIRKIND(enum.Enum) :
     "how to interpret file/dir specs in filter rules."
     ROOT = 0 # interpret as spec relative to root dir
     HASDIR = 1 # specs consist of parent dir followed by one or more child specs
-    EVERYWHERE = 2 # interpet as spec relative to root dir and all subdirs
-    ISDIR = 3 # spec is itself a dir
+    EVERYWHERE = 2 # interpret as spec relative to root dir and all subdirs
+    ISDIR = 3 # spec is itself a dir of which all contained files are to be included
 #end DIRKIND
 
 class RULE_ACTION(enum.Enum) :
