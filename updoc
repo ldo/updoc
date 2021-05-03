@@ -82,6 +82,7 @@ class DEPEND_ACTION(enum.Enum) :
     #end msg_required_args
 
 #end DEPEND_ACTION
+DEPEND_ACTION.from_keyword = dict((i.keyword, i) for i in DEPEND_ACTION)
 
 def open_db(dbname, mode) :
     "opens the specified database file and returns a new connection. mode is DB_OPEN value."
@@ -106,8 +107,14 @@ def open_db(dbname, mode) :
             "create table depends_rule\n"
             "  (\n"
             "    ordering integer primary key not null,\n" # for ordering of rules
-            "    include integer not null,\n" # True to include matching, False to exclude
-            "    pathspec varchar not null\n"
+            "    action varchar not null\n"
+            "  )\n",
+            "create table depends_item\n"
+            "  (\n"
+            "    rule_ordering integer not null,\n" # = depends_rule.depends_item
+            "    item_ordering integer not null,\n" # for ordering of items within rule
+            "    pathspec varchar not null,\n"
+            "    primary key(rule_ordering, item_ordering)\n"
             "  )\n",
         ]
     result = \
@@ -140,6 +147,98 @@ def open_db(dbname, mode) :
     return \
         result
 #end open_db_common
+
+def parse_wildcard(parent, child) :
+    # returns a compiled re.Pattern object that will match filenames
+    # according to a given parent directory and child item pattern
+    # that can contain shell-style wildcards.
+
+    def parse_wildcard_path(s, default) :
+        # returns an re.Pattern string that matches a given string that
+        # can contain shell-style wildcards.
+        if s != None :
+            if s.startswith("/") :
+                raise ValueError("relative pathspecs only")
+            #end if
+            t = ""
+            i = 0
+            cur_set = None
+            while True :
+                if i == len(s) :
+                    if cur_set != None :
+                        raise ValueError("incomplete “[...]” sequence")
+                    #end if
+                    break
+                #end if
+                c = s[i]
+                i += 1
+                if c == "\\" :
+                    if i == len(s) :
+                        raise ValueError("incomplete “\\” sequence")
+                    #end if
+                    c = s[i]
+                    i += 1
+                    if c == "n" :
+                        c = "\n"
+                    elif c == "t" :
+                        c = "\t"
+                    #end if
+                    c = re.escape(c)
+                elif cur_set == None and c == "*" :
+                    if i < len(s) and s[i] == "*" :
+                        i += 1
+                        c = ".*" # can match “/”
+                    else :
+                        c = "[^\\/]*"
+                    #end if
+                elif cur_set == None and c == "?" :
+                    c = "[^\\/]"
+                elif cur_set == None and c == "[" :
+                    cur_set = ""
+                    c = None
+                elif cur_set != None and len(cur_set) == 0 and c == "^" :
+                    pass # include c as-is
+                elif cur_set != None and c == "]" :
+                    c = "[" + cur_set + "]"
+                    cur_set = None
+                else :
+                    c = re.escape(c)
+                #end if
+                if c != None :
+                    if cur_set != None :
+                        cur_set += c
+                    else :
+                        t += c
+                    #end if
+                #end if
+            #end while
+        else :
+            t = default
+        #end if
+        return \
+            t
+    #end parse_wildcard_path
+
+#begin parse_wildcard
+    if parent != None :
+        while parent.endswith("/") :
+            parent = parent[:-1]
+        #end while
+    #end if
+    parent_pat = parse_wildcard_path(parent, "")
+    child_pat = parse_wildcard_path(child, ".*")
+    if parent_pat != "" :
+        pat = parent_pat + "\\/(?:.+\\/)*" + child_pat
+    else :
+        pat = child_pat
+    #end if
+    if parent == None :
+        # match filename anywhere in hierarchy
+        pat = "(?:.+\\/)*" + pat
+    #end if
+    return \
+        pat
+#end parse_wildcard
 
 def parse_manifest(contents) :
     # parses a string which has the format of the contents of a MANIFEST.in
@@ -184,98 +283,6 @@ def parse_manifest(contents) :
             result
     #end tokenize_line
 
-    def parse_wildcard(parent, child) :
-        # returns a compiled re.Pattern object that will match filenames
-        # according to a given parent directory and child item pattern
-        # that can contain shell-style wildcards.
-
-        def parse_wildcard_path(s, default) :
-            # returns an re.Pattern string that matches a given string that
-            # can contain shell-style wildcards.
-            if s != None :
-                if s.startswith("/") :
-                    raise ValueError("relative pathspecs only")
-                #end if
-                t = ""
-                i = 0
-                cur_set = None
-                while True :
-                    if i == len(s) :
-                        if cur_set != None :
-                            raise ValueError("incomplete “[...]” sequence")
-                        #end if
-                        break
-                    #end if
-                    c = s[i]
-                    i += 1
-                    if c == "\\" :
-                        if i == len(s) :
-                            raise ValueError("incomplete “\\” sequence")
-                        #end if
-                        c = s[i]
-                        i += 1
-                        if c == "n" :
-                            c = "\n"
-                        elif c == "t" :
-                            c = "\t"
-                        #end if
-                        c = re.escape(c)
-                    elif cur_set == None and c == "*" :
-                        if i < len(s) and s[i] == "*" :
-                            i += 1
-                            c = ".*" # can match “/”
-                        else :
-                            c = "[^\\/]*"
-                        #end if
-                    elif cur_set == None and c == "?" :
-                        c = "[^\\/]"
-                    elif cur_set == None and c == "[" :
-                        cur_set = ""
-                        c = None
-                    elif cur_set != None and len(cur_set) == 0 and c == "^" :
-                        pass # include c as-is
-                    elif cur_set != None and c == "]" :
-                        c = "[" + cur_set + "]"
-                        cur_set = None
-                    else :
-                        c = re.escape(c)
-                    #end if
-                    if c != None :
-                        if cur_set != None :
-                            cur_set += c
-                        else :
-                            t += c
-                        #end if
-                    #end if
-                #end while
-            else :
-                t = default
-            #end if
-            return \
-                t
-        #end parse_wildcard_path
-
-    #begin parse_wildcard
-        if parent != None :
-            while parent.endswith("/") :
-                parent = parent[:-1]
-            #end while
-        #end if
-        parent_pat = parse_wildcard_path(parent, "")
-        child_pat = parse_wildcard_path(child, ".*")
-        if parent_pat != "" :
-            pat = parent_pat + "\\/(?:.+\\/)*" + child_pat
-        else :
-            pat = child_pat
-        #end if
-        if parent == None :
-            # match filename anywhere in hierarchy
-            pat = "(?:.+\\/)*" + pat
-        #end if
-        return \
-            pat
-    #end parse_wildcard
-
 #begin parse_manifest
     result = []
     for line in contents.split("\n") :
@@ -283,45 +290,79 @@ def parse_manifest(contents) :
         if not line.startswith("#") :
             items = tokenize_line(line)
             if len(items) != 0 :
-                keyword = items.pop(0)
-                if keyword in ("include", "exclude") :
-                    include = keyword == "include"
-                    for item in items :
-                        result.append((include, parse_wildcard("", item)))
-                    #end for
-                elif keyword in ("recursive-include", "recursive-exclude") :
-                    include = keyword == "recursive-include"
-                    if len(items) < 2 :
-                        raise ValueError \
-                          (
-                                "required parent directory and at least one child filespec for “%s”"
-                            %
-                                keyword
-                          )
-                    #end if
-                    parent = items.pop(0)
-                    for item in items :
-                        result.append((include, parse_wildcard(parent, item)))
-                    #end for
-                elif keyword in ("global-include", "global-exclude") :
-                    include = keyword == "global-include"
-                    for item in items :
-                        result.append((include, parse_wildcard(None, item)))
-                    #end for
-                elif keyword in ("graft", "prune") :
-                    include = keyword == "graft"
-                    for item in items :
-                        result.append((include, parse_wildcard(item, None)))
-                    #end for
-                else :
-                    raise ValueError("unrecognized manifest keyword “%s”" % keyword)
+                keyword = items[0]
+                action = DEPEND_ACTION.from_keyword.get(keyword)
+                if action == None :
+                    raise ValueError("unrecognized rule keyword “%s”" % keyword)
                 #end if
+                if len(items) < action.min_args + 1 :
+                    raise ValueError("%s for %s" % (action.msg_required_args, keyword))
+                #end if
+                result.append(items)
             #end if
         #end if
     #end for
     return \
         result
 #end parse_manifest
+
+def load_depends(db) :
+    "generator which loads the dependency rules from the database."
+    depends_iter = db_iter \
+      (
+        db,
+        "select depends_rule.ordering, depends_item.item_ordering, depends_rule.action,"
+        " depends_item.pathspec from depends_rule left join depends_item on"
+        " depends_rule.ordering = depends_item.rule_ordering order by"
+        " depends_rule.ordering, depends_item.item_ordering"
+      )
+    last_rule_index = None
+    last_rule_action = None
+    rule_items = None
+    while True :
+        item = next(depends_iter, None)
+        if item != None :
+            rule_index, item_index, rule_action, item_pathspec = item
+        else :
+            rule_index = None
+        #end if
+        if rule_index == None or rule_index != last_rule_index :
+            if last_rule_index != None :
+                yield (last_rule_action, rule_items)
+                last_rule_index = None
+            #end if
+            if rule_index == None :
+                break
+            last_rule_index = rule_index
+            last_rule_action = rule_action
+            rule_items = []
+        #end if
+        if item_pathspec != None :
+            rule_items.append(item_pathspec)
+        #end if
+    #end while
+#end load_depends
+
+def parse_depends(db) :
+    "generator which loads and parses the dependency rules from the database," \
+    " yielding («include_matching», «match_pattern») pairs in order."
+    for action, items in load_depends(db) :
+        action = DEPEND_ACTION.from_keyword[action]
+        to_parse = \
+            {
+                DIRKIND.ROOT : lambda item : ("", item),
+                DIRKIND.HASDIR : lambda parent : lambda item : (parent, item),
+                DIRKIND.EVERYWHERE : lambda item : (None, item),
+                DIRKIND.ISDIR : lambda item : (item, None),
+            }[action.dirkind]
+        if action.min_args > 1 :
+            to_parse = to_parse(items.pop(0))
+        #end if
+        for item in items :
+            yield (action.include_matching, parse_wildcard(*to_parse(item)))
+        #end for
+    #end for
+#end parse_depends
 
 #+
 # Definitions of valid commands.
@@ -399,16 +440,30 @@ def cmd_setdepends(args, opts) :
     db = open_db(dbname, DB_OPEN.READWRITE)
     cu = db.cursor()
     cu.execute("begin transaction")
-    cu.execute("delete from depends_rule")
+    for table in ("depends_item", "depends_rule") :
+        cu.execute("delete from %s" % table)
+    #end for
     rule_index = 0
-    for include, pathspec in depends :
+    for items in depends :
         rule_index += 1
+        action = items.pop(0)
         cu.execute \
           (
-                "insert into depends_rule(ordering, include, pathspec) values(%d, %d, %s)"
+                "insert into depends_rule(ordering, action) values(%d, %s)"
             %
-                (rule_index, include, sqlite.format_sql_value(pathspec))
+                (rule_index, sqlite.format_sql_value(action))
           )
+        item_index = 0
+        for item in items :
+            item_index += 1
+            cu.execute \
+              (
+                    "insert into depends_item(rule_ordering, item_ordering, pathspec)"
+                    " values (%d, %d, %s)"
+                %
+                    (rule_index, item_index, sqlite.format_sql_value(item))
+              )
+        #end for
     #end for
     cu.execute("end transaction")
     cu.close()
@@ -419,21 +474,20 @@ def cmd_showdepends(args, opts) :
     dbname, = args
     db = open_db(dbname, DB_OPEN.READONLY)
     first = True
-    for index, include, pathspec in db_iter \
-      (
-        db,
-        "select ordering, include, pathspec from depends_rule order by ordering"
-      ) \
-    :
+    for action, items in load_depends(db) :
         if first :
-            sys.stdout.write("idx include pathspec\n")
+            sys.stdout.write \
+              (
+                "action                  items\n"
+                "--------------------    -----\n"
+              )
             first = False
         #end if
         sys.stdout.write \
           (
-                "%0.3d    %s    %s\n"
+                "%-20s    %s\n"
             %
-                (index, ("N", "Y")[include], pathspec)
+                (action, " ".join(items))
           )
     #end for
     if first :
