@@ -616,7 +616,45 @@ def cmd_save(args, opts) :
       )
 #end cmd_save
 
-# more TBD
+def cmd_restore(args, opts) :
+    dbname, snapid, destdir = args
+    snapid = int(snapid)
+    preserve_timestamps = "preserve-timestamps" in opts
+    overwrite = "overwrite" in opts
+    db = open_db(dbname, DB_OPEN.READONLY)
+    if not stat.S_ISDIR(os.lstat(destdir).st_mode) :
+        raise ValueError("not a directory: “%s”" % basedir)
+    #end if
+    if next(db_iter(db, "select id from snapshots where id = %d" % snapid), None) == None :
+        raise ValueError("no such snapshot with ID %d" % snapid)
+    #end if
+    nr_restored = 0
+    for childname, timestamp, contents in db_iter \
+      (
+        db,
+            "select files.path, files.timestamp, files.contents from snapshots"
+            " inner join files on snapshots.id = files.snapshot_id where snapshots.id = %d"
+        %
+            snapid
+      ) \
+    :
+        sys.stdout.write("restore %s\n" % childname)
+        childpath = os.path.join(destdir, childname)
+        if not overwrite and os.path.exists(childpath) :
+            raise FileExistsError("dest file “%s” already exists in %s" % (childname, destdir))
+        #end if
+        os.makedirs(os.path.split(childpath)[0], exist_ok = True)
+        childfile = open(childpath, "wb")
+        childfile.write(contents)
+        childfile.close()
+        if preserve_timestamps :
+            os.utime(childpath, (timestamp, timestamp))
+        #end if
+        nr_restored += 1
+    #end for
+    db.close()
+    sys.stdout.write("%d files restored.\n" % nr_restored)
+#end cmd_restore
 
 recognized_commands = \
     {
@@ -686,7 +724,14 @@ recognized_commands = \
                     " according to its currently loaded dependency rules",
             },
 
-        # more TBD
+        "restore" :
+            {
+                "args" : 3,
+                "opts" : ("overwrite", "preserve-timestamps",),
+                "action" : cmd_restore,
+                "help_usage" : "«dbname» «snapid» «dest_dir»",
+                "help_descr" : "restores a previously-saved snapshot into a specified directory",
+            },
 
     } # recognized_commands
 
