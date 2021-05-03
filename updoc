@@ -1,0 +1,570 @@
+#!/usr/bin/python3
+#+
+# Tool to maintain versions of a document and associated
+# dependent files. The saved history for a file named “«file»”
+# is in an SQLite database named “«file».ver”.
+#-
+
+import sys
+import os
+import enum
+import re
+import fnmatch
+import getopt
+import apsw as sqlite
+
+#+
+# Database stuff
+#-
+
+snap_suffix = ".ver"
+
+class DB_OPEN(enum.IntEnum) :
+    "database opening modes."
+    READONLY = 0 # existing database, only for reading
+    READWRITE = 1 # existing database, for reading and writing
+    READWRITECREATE = 2 # create database if it doesn’t exist, open for reading and writing
+#end DB_OPEN
+
+def db_iter(conn, cmd, mapfn = lambda x : x) :
+    "executes cmd on a new cursor from connection conn and yields the results in turn."
+    for item in conn.cursor().execute(cmd) :
+        yield mapfn(item)
+    #end for
+#end db_iter
+
+class DIRKIND(enum.Enum) :
+    "how to interpret file/dir specs in dependency actions."
+    ROOT = 0 # interpret as spec relative to root dir
+    HASDIR = 1 # specs consist of parent dir followed by one or more child specs
+    EVERYWHERE = 2 # interpet as spec relative to root dir and all subdirs
+    ISDIR = 3 # spec is itself a dir
+#end DIRKIND
+
+class DEPEND_ACTION(enum.Enum) :
+    "kinds of dependency actions."
+    INCLUDE = ("include", True, DIRKIND.ROOT, 0, None)
+    EXCLUDE = ("exclude", False, DIRKIND.ROOT, 0, None)
+    RECURSIVE_INCLUDE = \
+        ("recursive-include", True, DIRKIND.HASDIR, 2,
+            "required parent directory and at least one child filespec")
+    RECURSIVE_EXCLUDE = \
+        ("recursive-exclude", False, DIRKIND.HASDIR, 2,
+            "required parent directory and at least one child filespec")
+    GLOBAL_INCLUDE = ("global-include", True, DIRKIND.EVERYWHERE, 0, None)
+    GLOBAL_EXCLUDE = ("global-exclude", False, DIRKIND.EVERYWHERE, 0, None)
+    GRAFT = ("graft", True, DIRKIND.ISDIR, 0, None)
+    PRUNE = ("prune", False, DIRKIND.ISDIR, 0, None)
+
+    @property
+    def keyword(self) :
+        return self.value[0]
+    #end keyword
+
+    @property
+    def include_matching(self) :
+        "True to include matching items, False to exclude them."
+        return self.value[1]
+    #end include_matching
+
+    @property
+    def dirkind(self) :
+        return self.value[2]
+    #end dirkind
+
+    @property
+    def min_args(self) :
+        "minimum number of pathspec args to this action."
+        return self.value[3]
+    #end min_args
+
+    @property
+    def msg_required_args(self) :
+        "message to show for incorrect args."
+        return self.value[4]
+    #end msg_required_args
+
+#end DEPEND_ACTION
+
+def open_db(dbname, mode) :
+    "opens the specified database file and returns a new connection. mode is DB_OPEN value."
+    test_table = "snapshots"
+    test_field = "id"
+    create_tables = \
+        [
+            "create table snapshots\n"
+            "  (\n"
+            "    id integer primary key autoincrement,\n"
+            "    comment varchar not null,\n"
+            "    timestamp integer not null\n"
+            "  )\n",
+            "create table file\n"
+            "  (\n"
+            "    snapshot_id integer not null,\n" # = snapshots.id
+            "    path varchar not null,\n"
+            "    timestamp integer not null,\n"
+            "    contents blob not null,\n"
+            "    primary key (snapshot_id, path)\n"
+            "  )\n",
+            "create table depends_rule\n"
+            "  (\n"
+            "    ordering integer primary key not null,\n" # for ordering of rules
+            "    include integer not null,\n" # True to include matching, False to exclude
+            "    pathspec varchar not null\n"
+            "  )\n",
+        ]
+    result = \
+        sqlite.Connection \
+          (
+            dbname,
+            flags =
+                    (sqlite.SQLITE_OPEN_READONLY, sqlite.SQLITE_OPEN_READWRITE)
+                        [mode >= DB_OPEN.READWRITE]
+                |
+                    (0, sqlite.SQLITE_OPEN_CREATE)[mode == DB_OPEN.READWRITECREATE]
+          )
+    cu = result.cursor()
+    try :
+        cu.execute("select count(*) from %s where %s is not null" % (test_table, test_field))
+        inited = True
+    except sqlite.SQLError :
+        if mode < DB_OPEN.READWRITECREATE :
+            raise
+        #end if
+        # assume it’s a newly-created database, need to set up the tables
+        inited = False
+    #end try
+    if not inited :
+        sys.stderr.write("Initializing new database\n") # debug
+        for create_table in create_tables :
+            cu.execute(create_table)
+        #end for
+    #end if
+    return \
+        result
+#end open_db_common
+
+def parse_manifest(contents) :
+    # parses a string which has the format of the contents of a MANIFEST.in
+    # file. Returns a list of («include», «pattern») tuples where «include»
+    # is True to include a file if it matches «pattern», False to exclude it.
+
+    def tokenize_line(s) :
+        if "\t" in s :
+            raise SyntaxError("no tabs allowed")
+            # or I could fix parser to handle as part of whitespace
+        #end if
+        result = []
+        cur_token = None
+        while len(s) != 0 :
+            pos1 = s.find("\\")
+            pos2 = s.find(" ")
+            if pos1 < 0 :
+                pos1 = len(s)
+            #end if
+            if pos2 < 0 :
+                pos2 = len(s)
+            #end if
+            if cur_token == None and pos2 != 0 :
+                cur_token = ""
+            #end if
+            if pos1 < pos2 :
+                if pos1 + 1 == len(s) :
+                    raise ValueError("incomplete “\\” sequence")
+                #end if
+                cur_token += s[:pos1 + 2]
+                s = s[pos1 + 2:]
+            else :
+                if pos2 != 0 :
+                    cur_token += s[:pos2]
+                    result.append(cur_token)
+                    cur_token = None
+                #end if
+                s = s[pos2 + 1:]
+            #end if
+        #end while
+        return \
+            result
+    #end tokenize_line
+
+    def parse_wildcard(parent, child) :
+        # returns a compiled re.Pattern object that will match filenames
+        # according to a given parent directory and child item pattern
+        # that can contain shell-style wildcards.
+
+        def parse_wildcard_path(s, default) :
+            # returns an re.Pattern string that matches a given string that
+            # can contain shell-style wildcards.
+            if s != None :
+                if s.startswith("/") :
+                    raise ValueError("relative pathspecs only")
+                #end if
+                t = ""
+                i = 0
+                cur_set = None
+                while True :
+                    if i == len(s) :
+                        if cur_set != None :
+                            raise ValueError("incomplete “[...]” sequence")
+                        #end if
+                        break
+                    #end if
+                    c = s[i]
+                    i += 1
+                    if c == "\\" :
+                        if i == len(s) :
+                            raise ValueError("incomplete “\\” sequence")
+                        #end if
+                        c = s[i]
+                        i += 1
+                        if c == "n" :
+                            c = "\n"
+                        elif c == "t" :
+                            c = "\t"
+                        #end if
+                        c = re.escape(c)
+                    elif cur_set == None and c == "*" :
+                        if i < len(s) and s[i] == "*" :
+                            i += 1
+                            c = ".*" # can match “/”
+                        else :
+                            c = "[^\\/]*"
+                        #end if
+                    elif cur_set == None and c == "?" :
+                        c = "[^\\/]"
+                    elif cur_set == None and c == "[" :
+                        cur_set = ""
+                        c = None
+                    elif cur_set != None and len(cur_set) == 0 and c == "^" :
+                        pass # include c as-is
+                    elif cur_set != None and c == "]" :
+                        c = "[" + cur_set + "]"
+                        cur_set = None
+                    else :
+                        c = re.escape(c)
+                    #end if
+                    if c != None :
+                        if cur_set != None :
+                            cur_set += c
+                        else :
+                            t += c
+                        #end if
+                    #end if
+                #end while
+            else :
+                t = default
+            #end if
+            return \
+                t
+        #end parse_wildcard_path
+
+    #begin parse_wildcard
+        if parent != None :
+            while parent.endswith("/") :
+                parent = parent[:-1]
+            #end while
+        #end if
+        parent_pat = parse_wildcard_path(parent, "")
+        child_pat = parse_wildcard_path(child, ".*")
+        if parent_pat != "" :
+            pat = parent_pat + "\\/(?:.+\\/)*" + child_pat
+        else :
+            pat = child_pat
+        #end if
+        if parent == None :
+            # match filename anywhere in hierarchy
+            pat = "(?:.+\\/)*" + pat
+        #end if
+        return \
+            pat
+    #end parse_wildcard
+
+#begin parse_manifest
+    result = []
+    for line in contents.split("\n") :
+        line = line.lstrip()
+        if not line.startswith("#") :
+            items = tokenize_line(line)
+            if len(items) != 0 :
+                keyword = items.pop(0)
+                if keyword in ("include", "exclude") :
+                    include = keyword == "include"
+                    for item in items :
+                        result.append((include, parse_wildcard("", item)))
+                    #end for
+                elif keyword in ("recursive-include", "recursive-exclude") :
+                    include = keyword == "recursive-include"
+                    if len(items) < 2 :
+                        raise ValueError \
+                          (
+                                "required parent directory and at least one child filespec for “%s”"
+                            %
+                                keyword
+                          )
+                    #end if
+                    parent = items.pop(0)
+                    for item in items :
+                        result.append((include, parse_wildcard(parent, item)))
+                    #end for
+                elif keyword in ("global-include", "global-exclude") :
+                    include = keyword == "global-include"
+                    for item in items :
+                        result.append((include, parse_wildcard(None, item)))
+                    #end for
+                elif keyword in ("graft", "prune") :
+                    include = keyword == "graft"
+                    for item in items :
+                        result.append((include, parse_wildcard(item, None)))
+                    #end for
+                else :
+                    raise ValueError("unrecognized manifest keyword “%s”" % keyword)
+                #end if
+            #end if
+        #end if
+    #end for
+    return \
+        result
+#end parse_manifest
+
+#+
+# Definitions of valid commands.
+#
+# Each command function is passed two arguments: the first is
+# the list of positional arguments, and the second is the
+# dictionary of option keywords and corresponding values
+# that were specified.
+#-
+
+def cmd_help(args, opts) :
+    "shows the user the help description for a command, or for the help" \
+    " command itself if no valid command is given."
+    command_candidates = None
+    command_match = None
+    if len(args) == 1 :
+        cmd = args[0]
+        if cmd not in recognized_commands :
+            command_match = cmd
+            cmd = None
+            command_candidates = list \
+              (
+                c for c in recognized_commands.keys()
+                if fnmatch.fnmatch(c, command_match)
+              )
+        #end if
+    else :
+        cmd = "help"
+        command_candidates = recognized_commands.keys()
+    #end if
+    if cmd != None :
+        sys.stderr.write \
+          (
+                "Usage:\n\n\t%s %s %s\n\n%s.\n"
+            %
+                (
+                    sys.argv[0],
+                    cmd,
+                    recognized_commands[cmd]["help_usage"],
+                    recognized_commands[cmd]["help_descr"],
+                )
+          )
+    #end if
+    if command_candidates != None :
+        if len(command_candidates) != 0 :
+            sys.stderr.write \
+              (
+                    "\nValid commands%(matching)s are: %(commands)s.\n"
+                %
+                    {
+                        "matching" :
+                            ["", " matching \"%s\"" % command_match][command_match != None],
+                        "commands" : ", ".join(sorted(command_candidates)),
+                    }
+              )
+        else :
+            sys.stderr.write("No commands matching \"%s\".\n" % command_match)
+        #end if
+    #end if
+#end cmd_help
+
+def cmd_init(args, opts) :
+    docname, = args
+    if not os.path.isfile(docname) :
+        raise getopt.GetoptError("no such docfile “%s”" % docname)
+    #end if
+    dbname = docname + snap_suffix
+    if os.path.isfile(dbname) :
+        raise getopt.GetoptError("versions file “%s” already exists" % dbname)
+    #end if
+    db = open_db(dbname, DB_OPEN.READWRITECREATE)
+    db.close()
+#end cmd_init
+
+def cmd_setdepends(args, opts) :
+    docname, dependsname = args
+    depends = parse_manifest(open(dependsname, "rt").read())
+    sys.stdout.write("parsed manifest = %s\n" % repr(depends)) # debug
+    db = open_db(docname + snap_suffix, DB_OPEN.READWRITE)
+    cu = db.cursor()
+    cu.execute("begin transaction")
+    cu.execute("delete from depends_rule")
+    rule_index = 0
+    for include, pathspec in depends :
+        rule_index += 1
+        cu.execute \
+          (
+                "insert into depends_rule(ordering, include, pathspec) values(%d, %d, %s)"
+            %
+                (rule_index, include, sqlite.format_sql_value(pathspec))
+          )
+    #end for
+    cu.execute("end transaction")
+    cu.close()
+    db.close()
+#end cmd_setdepends
+
+def cmd_showdepends(args, opts) :
+    docname, = args
+    db = open_db(docname + snap_suffix, DB_OPEN.READONLY)
+    first = True
+    for index, include, pathspec in db_iter \
+      (
+        db,
+        "select ordering, include, pathspec from depends_rule order by ordering"
+      ) \
+    :
+        if first :
+            sys.stdout.write("idx include pathspec\n")
+            first = False
+        #end if
+        sys.stdout.write \
+          (
+                "%0.3d    %s    %s\n"
+            %
+                (index, ("N", "Y")[include], pathspec)
+          )
+    #end for
+    if first :
+        sys.stdout.write("No dependency rules found.\n")
+    #end if
+#end cmd_showdepends
+
+# more TBD
+
+recognized_commands = \
+    {
+# key is command name, value is dictionary with following fields:
+#     args -- nr required positional args, or tuple of min and max nr required positional args
+#     opts -- tuple of long option names. If a name ends in an equal sign, then it takes a value.
+#     multivalued -- optional tuple of option keywords which can occur multiple times
+#     required -- optional tuple of option keywords which must be present
+#     help_usage -- used to construct a usage string when giving help for the command.
+#     help_descr -- explanatory text shown when giving help for the command.
+#     action -- the function to invoke to actually perform the command.
+
+        "help" :
+            {
+                "args" : (0, 1),
+                "opts" : (),
+                "action" : cmd_help,
+                "help_usage" : "[cmd]",
+                "help_descr" : "gives help about the specified command",
+            },
+
+        "init" :
+            {
+                "args" : 1,
+                "opts" : (),
+                "action" : cmd_init,
+                "help_usage" : "«docname»",
+                "help_descr" : "initializes a snapshot database for the specified document",
+            },
+
+        "setdepends" :
+            {
+                "args" : 2,
+                "opts" : (),
+                "action" : cmd_setdepends,
+                "help_usage" : "«docname» «depends»",
+                "help_descr" : "parses «depends» and set the snapshot dependencies for «docname»",
+            },
+
+        "showdepends" :
+            {
+                "args" : 1,
+                "opts" : (),
+                "action" : cmd_showdepends,
+                "help_usage" : "«docname»",
+                "help_descr" : "shows the current snapshot dependencies for «docname»",
+            },
+
+        # more TBD
+
+    } # recognized_commands
+
+#+
+# Mainline
+#-
+
+def mainline() :
+    if len(sys.argv) < 2 :
+        raise getopt.GetoptError("need at least one arg, the cmd to execute")
+    #end if
+    cmd = sys.argv[1]
+    cmd_entry = recognized_commands.get(cmd)
+    if cmd_entry == None :
+        raise getopt.GetoptError("unrecognized command %s" % repr(cmd))
+    #end if
+    opts_list, args = getopt.gnu_getopt \
+      (
+        sys.argv[2:],
+        "",
+        cmd_entry["opts"]
+      )
+    if type(cmd_entry["args"]) == tuple :
+        if \
+          (
+                len(args) < cmd_entry["args"][0]
+            or
+                len(args) > cmd_entry["args"][1]
+          ):
+            raise getopt.GetoptError \
+              (
+                "%s command needs %u..%u args" % ((cmd,) + cmd_entry["args"])
+              )
+        #end if
+    else :
+        if len(args) != cmd_entry["args"] :
+            raise getopt.GetoptError \
+              (
+                "%s command needs exactly %u args" % (cmd, cmd_entry["args"])
+              )
+        #end if
+    #end if
+    opts = {}
+    multi_opts = frozenset(cmd_entry.get("multivalued", ()))
+    for keyword, value in opts_list :
+        if keyword[:2] == "--" :
+            keyword = keyword[2:]
+            if keyword in multi_opts :
+                values = opts.get(keyword, [])
+                values.append(value)
+                opts[keyword] = values
+            else :
+                opts[keyword] = value
+            #end if
+        #end if
+    #end for
+    required_opts = cmd_entry.get("required")
+    if required_opts != None :
+        missing = set(required_opts) - set(opts.keys())
+        if len(missing) != 0 :
+            raise getopt.GetoptError \
+              (
+                "%s command needs option(s) %s" % (cmd, ",".join(tuple(missing)))
+              )
+        #end if
+    #end if
+    cmd_entry["action"](args, opts) # can raise exceptions
+#end mainline
+
+mainline()
