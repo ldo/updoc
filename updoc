@@ -513,8 +513,8 @@ def cmd_list(args, opts) :
         if first :
             sys.stdout.write \
               (
-                "id   when            comment\n"
-                "---  --------------  ----------------\n"
+                "id          when              comment\n"
+                "---  -------------------  ----------------\n"
               )
             first = False
         #end if
