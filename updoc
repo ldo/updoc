@@ -762,7 +762,6 @@ def mainline() :
             long_opts.append(opt)
         #end if
     #end for
-    sys.stderr.write("short opts = %s, long opts = %s\n" % (repr("".join(k + ("", ":")[short_opts[k]["has_value"]] for k in short_opts)), repr(long_opts))) # debug
     opts_list, args = getopt.gnu_getopt \
       (
         sys.argv[2:],
