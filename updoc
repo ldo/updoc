@@ -511,7 +511,12 @@ def cmd_list(args, opts) :
           (
                 "%0.3d  %s  %5d  %s\n"
             %
-                (id, time.strftime("%Y-%m-%d %H-%M-%S", time.localtime(round(timestamp))), nr_files, comment)
+                (
+                    id,
+                    time.strftime("%Y-%m-%d %H-%M-%S", time.localtime(round(timestamp))),
+                    nr_files,
+                    comment,
+                )
           )
     #end for
     if first :
