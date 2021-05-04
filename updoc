@@ -479,23 +479,11 @@ def cmd_showfilters(args, opts) :
     db = open_db(dbname, DB_OPEN.READONLY)
     first = True
     for action, items in load_filters(db) :
-        if first :
-            sys.stdout.write \
-              (
-                "action                  items\n"
-                "--------------------    -----\n"
-              )
-            first = False
-        #end if
-        sys.stdout.write \
-          (
-                "%-20s    %s\n"
-            %
-                (action, " ".join(items))
-          )
+        first = False
+        sys.stdout.write(" ".join([action] + items) + "\n")
     #end for
     if first :
-        sys.stdout.write("No filter rules found.\n")
+        sys.stdout.write("# No filter rules found.\n")
     #end if
     db.close()
 #end cmd_showfilters
