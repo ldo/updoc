@@ -310,25 +310,6 @@ def parse_manifest(contents) :
         result
 #end parse_manifest
 
-def escape_token(s) :
-    "returns a quoted form of the token value s that can be fed back into" \
-    " parse_manifest/tokenize_line."
-    t = ""
-    split = re.compile(r"([\\\t\n ])")
-    remap = {"\t" : "t", "\n" : "n"}
-    while True :
-        s = re.split(split, s, 1)
-        if len(s) == 1 :
-            t += s[0]
-            break
-        #end if
-        pre, ch, s = s
-        ch = remap.get(ch, ch)
-        t += pre + "\\" + ch
-    #end while
-    return t
-#end escape_token
-
 def load_filters(db) :
     "generator which loads the filter specs from the database."
     rules_iter = db_iter \
@@ -510,7 +491,7 @@ def cmd_showfilters(args, opts) :
           (
                 "%-20s    %s\n"
             %
-                (action, " ".join(escape_token(s) for s in items))
+                (action, " ".join(items))
           )
     #end for
     if first :
