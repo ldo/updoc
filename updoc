@@ -271,8 +271,8 @@ def parse_manifest(contents) :
                 #end if
                 cur_token += s[:pos1 + 2]
                 s = s[pos1 + 2:]
-            else :
-                if pos2 != 0 :
+            else : # pos2 < pos1
+                if cur_token != None :
                     cur_token += s[:pos2]
                     result.append(cur_token)
                     cur_token = None
