@@ -715,7 +715,7 @@ recognized_commands = \
         "save" :
             {
                 "args" : 2,
-                "opts" : ("message=",),
+                "opts" : ("message/m=",),
                 "action" : cmd_save,
                 "help_usage" : "[--message=«message»] «dbname» «base_dir»",
                 "help_descr" :
@@ -757,7 +757,7 @@ def mainline() :
                 raise RuntimeError("invalid short opt for %s" % repr(opt))
             #end if
             short_opts[short_opt] = {"long_opt" : long_opt, "has_value" : has_value}
-            long_opts.append(long_opt)
+            long_opts.append(long_opt + ("", "=")[has_value])
         else :
             long_opts.append(opt)
         #end if
