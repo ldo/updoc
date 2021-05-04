@@ -440,7 +440,6 @@ def cmd_init(args, opts) :
 def cmd_setfilters(args, opts) :
     dbname, filter_filename = args
     filters = parse_manifest(open(filter_filename, "rt").read())
-    sys.stdout.write("parsed manifest = %s\n" % repr(filters)) # debug
     db = open_db(dbname, DB_OPEN.READWRITE)
     cu = db.cursor()
     cu.execute("begin transaction")
