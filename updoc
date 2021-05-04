@@ -491,25 +491,27 @@ def cmd_list(args, opts) :
     dbname, = args
     db = open_db(dbname, DB_OPEN.READONLY)
     first = True
-    for id, comment, timestamp in db_iter \
+    for id, comment, timestamp, nr_files in db_iter \
       (
         db,
-        "select id, comment, timestamp from snapshots order by timestamp"
+        "select id, comment, snapshots.timestamp, count(*) from"
+        " snapshots left join files on snapshots.id = files.snapshot_id"
+        " group by snapshot_id order by snapshots.timestamp"
       ) \
     :
         if first :
             sys.stdout.write \
               (
-                "id          when              comment\n"
-                "---  -------------------  ----------------\n"
+                "id          when          files       comment\n"
+                "---  -------------------  -----  ----------------\n"
               )
             first = False
         #end if
         sys.stdout.write \
           (
-                "%0.3d  %s  %s\n"
+                "%0.3d  %s  %5d  %s\n"
             %
-                (id, time.strftime("%Y-%m-%d %H-%M-%S", time.localtime(round(timestamp))), comment)
+                (id, time.strftime("%Y-%m-%d %H-%M-%S", time.localtime(round(timestamp))), nr_files, comment)
           )
     #end for
     if first :
