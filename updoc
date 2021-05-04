@@ -726,7 +726,7 @@ recognized_commands = \
         "restore" :
             {
                 "args" : 3,
-                "opts" : ("overwrite", "preserve-timestamps",),
+                "opts" : ("overwrite/o", "preserve-timestamps/p",),
                 "action" : cmd_restore,
                 "help_usage" : "«dbname» «snapid» «dest_dir»",
                 "help_descr" : "restores a previously-saved snapshot into a specified directory",
@@ -747,11 +747,27 @@ def mainline() :
     if cmd_entry == None :
         raise getopt.GetoptError("unrecognized command %s" % repr(cmd))
     #end if
+    short_opts = {}
+    long_opts = []
+    for opt in cmd_entry["opts"] :
+        if "/" in opt :
+            has_value = opt.endswith("=")
+            long_opt, short_opt = opt[:len(opt) - has_value].split("/", 1)
+            if len(short_opt) != 1 :
+                raise RuntimeError("invalid short opt for %s" % repr(opt))
+            #end if
+            short_opts[short_opt] = {"long_opt" : long_opt, "has_value" : has_value}
+            long_opts.append(long_opt)
+        else :
+            long_opts.append(opt)
+        #end if
+    #end for
+    sys.stderr.write("short opts = %s, long opts = %s\n" % (repr("".join(k + ("", ":")[short_opts[k]["has_value"]] for k in short_opts)), repr(long_opts))) # debug
     opts_list, args = getopt.gnu_getopt \
       (
         sys.argv[2:],
-        "",
-        cmd_entry["opts"]
+        "".join(k + ("", ":")[short_opts[k]["has_value"]] for k in short_opts),
+        long_opts
       )
     if type(cmd_entry["args"]) == tuple :
         if \
@@ -777,14 +793,18 @@ def mainline() :
     multi_opts = frozenset(cmd_entry.get("multivalued", ()))
     for keyword, value in opts_list :
         if keyword[:2] == "--" :
-            keyword = keyword[2:]
-            if keyword in multi_opts :
-                values = opts.get(keyword, [])
-                values.append(value)
-                opts[keyword] = values
-            else :
-                opts[keyword] = value
-            #end if
+            opt = keyword[2:]
+        elif keyword[:1] == "-" :
+            opt = short_opts[keyword[1:]]["long_opt"]
+        else :
+            raise RuntimeError("unrecognized keyword %s" % repr(keyword))
+        #end if
+        if opt in multi_opts :
+            values = opts.get(opt, [])
+            values.append(value)
+            opts[opt] = values
+        else :
+            opts[opt] = value
         #end if
     #end for
     required_opts = cmd_entry.get("required")
