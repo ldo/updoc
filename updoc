@@ -17,6 +17,14 @@ import getopt
 import apsw as sqlite
 
 #+
+# Useful stuff
+#-
+
+def format_timestamp(timestamp) :
+    return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(round(timestamp)))
+#end format_timestamp
+
+#+
 # Database stuff
 #-
 
@@ -497,36 +505,85 @@ def cmd_showfilters(args, opts) :
 
 def cmd_list(args, opts) :
     dbname, = args
+    long_listing = "long" in opts
     db = open_db(dbname, DB_OPEN.READONLY)
     first = True
-    for id, comment, timestamp, nr_files in db_iter \
-      (
-        db,
-        "select id, comment, snapshots.timestamp, count(*) from"
-        " snapshots left join files on snapshots.id = files.snapshot_id"
-        " group by snapshot_id order by snapshots.timestamp"
-      ) \
-    :
-        if first :
+    if long_listing :
+        last_snap_id = None
+        iter_snaps = db_iter \
+          (
+            db,
+            "select id, comment, snapshots.timestamp, files.path, files.timestamp,"
+            " length(file_blobs.contents) from"
+            " snapshots left join files on snapshots.id = files.snapshot_id"
+            " left join file_blobs on files.sha256hash = file_blobs.sha256hash"
+            " order by snapshots.id, snapshots.timestamp, files.path"
+          )
+        while True :
+            snap = next(iter_snaps, None)
+            if snap != None :
+                snap_id, comment, snap_timestamp, filepath, file_timestamp, file_size = snap
+                assert file_size != None
+            else :
+                snap_id = None
+            #end if
+            if snap_id == None or snap_id != last_snap_id :
+                if last_snap_id != None :
+                    sys.stdout.write("Total of %d files, %d bytes\n" % (nr_files, total_size))
+                #end if
+                if snap_id == None :
+                    break
+                if not first :
+                    sys.stdout.write("\n")
+                #end if
+                first = False
+                sys.stdout.write("* snap ID %d at %s\n" % (snap_id, format_timestamp(snap_timestamp)))
+                last_snap_id = snap_id
+                nr_files = total_size = 0
+            #end if
             sys.stdout.write \
               (
-                "id          when          files       comment\n"
-                "---  -------------------  -----  ----------------\n"
+                    "  %10d %19s %s\n"
+                %
+                    (
+                        file_size,
+                        format_timestamp(file_timestamp),
+                        filepath,
+                    )
               )
-            first = False
-        #end if
-        sys.stdout.write \
+            total_size += file_size
+            nr_files += 1
+        #end while
+    else :
+        for id, comment, timestamp, nr_files in db_iter \
           (
-                "%0.3d  %s  %5d  %s\n"
-            %
-                (
-                    id,
-                    time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(round(timestamp))),
-                    nr_files,
-                    comment,
-                )
-          )
-    #end for
+            db,
+            "select id, comment, snapshots.timestamp, count(*) from"
+            " snapshots left join files on snapshots.id = files.snapshot_id"
+            " group by snapshot_id order by snapshots.timestamp"
+          ) \
+        :
+            if first :
+                sys.stdout.write \
+                  (
+                    "id          when          files       comment\n"
+                    "---  -------------------  -----  ----------------\n"
+                  )
+                first = False
+            #end if
+            sys.stdout.write \
+              (
+                    "%0.3d  %s  %5d  %s\n"
+                %
+                    (
+                        id,
+                        format_timestamp(timestamp),
+                        nr_files,
+                        comment,
+                    )
+              )
+        #end for
+    #end if
     if first :
         sys.stdout.write("No saved snapshots found.\n")
     #end if
@@ -720,9 +777,9 @@ recognized_commands = \
         "list" :
             {
                 "args" : 1,
-                "opts" : (),
+                "opts" : ("long/l",),
                 "action" : cmd_list,
-                "help_usage" : "«dbname»",
+                "help_usage" : "[--long|-l] «dbname»",
                 "help_descr" : "lists currently-saved snapshots in «dbname»",
             },
 
