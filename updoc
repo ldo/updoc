@@ -919,7 +919,7 @@ recognized_commands = \
                 "args" : 1,
                 "opts" : ("nofilters",),
                 "action" : cmd_init,
-                "help_usage" : "«dbname»",
+                "help_usage" : "[--nofilters] «dbname»",
                 "help_descr" : "initializes a snapshot database with the specified name",
             },
 
@@ -977,7 +977,7 @@ recognized_commands = \
                 "args" : 3,
                 "opts" : ("overwrite/o", "preserve-timestamps/p",),
                 "action" : cmd_restore,
-                "help_usage" : "«dbname» «snapid» «dest_dir»",
+                "help_usage" : "[--overwrite|-o] [--preserve-timestamps] «dbname» «snapid» «dest_dir»",
                 "help_descr" : "restores a previously-saved snapshot into a specified directory",
             },
 
