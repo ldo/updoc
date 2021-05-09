@@ -517,7 +517,7 @@ def cmd_list(args, opts) :
             " length(file_blobs.contents) from"
             " snapshots left join files on snapshots.id = files.snapshot_id"
             " left join file_blobs on files.sha256hash = file_blobs.sha256hash"
-            " order by snapshots.id, snapshots.timestamp, files.path"
+            " order by snapshots.timestamp, snapshots.id, files.path"
           )
         while True :
             snap = next(iter_snaps, None)
