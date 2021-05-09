@@ -135,14 +135,14 @@ def open_db(dbname, mode) :
             "    contents blob not null,\n"
             "    sha256hash varchar primary key not null\n" # hex hash of contents
             "  )\n",
-            "create table filter_rule\n"
+            "create table filter_rules\n"
             "  (\n"
             "    ordering integer primary key not null,\n" # for ordering of rules
             "    action varchar not null\n"
             "  )\n",
-            "create table filter_item\n"
+            "create table filter_items\n"
             "  (\n"
-            "    rule_ordering integer not null,\n" # = filter_rule.filter_item
+            "    rule_ordering integer not null,\n" # = filter_rules.filter_item
             "    item_ordering integer not null,\n" # for ordering of items within rule
             "    pathspec varchar not null,\n"
             "    primary key(rule_ordering, item_ordering)\n"
@@ -347,10 +347,10 @@ def load_filters(db) :
     rules_iter = db_iter \
       (
         db,
-        "select filter_rule.ordering, filter_item.item_ordering, filter_rule.action,"
-        " filter_item.pathspec from filter_rule left join filter_item on"
-        " filter_rule.ordering = filter_item.rule_ordering order by"
-        " filter_rule.ordering, filter_item.item_ordering"
+        "select filter_rules.ordering, filter_items.item_ordering, filter_rules.action,"
+        " filter_items.pathspec from filter_rules left join filter_items on"
+        " filter_rules.ordering = filter_items.rule_ordering order by"
+        " filter_rules.ordering, filter_items.item_ordering"
       )
     last_rule_index = None
     last_rule_action = None
@@ -404,7 +404,7 @@ def set_filters(db, filters) :
     "sets new filters on the specified snapshot database."
     cu = db.cursor()
     cu.execute("begin transaction")
-    for table in ("filter_item", "filter_rule") :
+    for table in ("filter_items", "filter_rules") :
         cu.execute("delete from %s" % table)
     #end for
     rule_index = 0
@@ -413,7 +413,7 @@ def set_filters(db, filters) :
         action = items.pop(0)
         cu.execute \
           (
-                "insert into filter_rule(ordering, action) values(%d, %s)"
+                "insert into filter_rules(ordering, action) values(%d, %s)"
             %
                 (rule_index, sqlite.format_sql_value(action))
           )
@@ -422,7 +422,7 @@ def set_filters(db, filters) :
             item_index += 1
             cu.execute \
               (
-                    "insert into filter_item(rule_ordering, item_ordering, pathspec)"
+                    "insert into filter_items(rule_ordering, item_ordering, pathspec)"
                     " values (%d, %d, %s)"
                 %
                     (rule_index, item_index, sqlite.format_sql_value(item))
