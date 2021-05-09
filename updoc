@@ -977,7 +977,7 @@ recognized_commands = \
                 "args" : 3,
                 "opts" : ("overwrite/o", "preserve-timestamps/p",),
                 "action" : cmd_restore,
-                "help_usage" : "[--overwrite|-o] [--preserve-timestamps] «dbname» «snapid» «dest_dir»",
+                "help_usage" : "[--overwrite|-o] [--preserve-timestamps|-p] «dbname» «snapid» «dest_dir»",
                 "help_descr" : "restores a previously-saved snapshot into a specified directory",
             },
 
