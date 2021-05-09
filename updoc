@@ -521,7 +521,7 @@ def cmd_list(args, opts) :
             %
                 (
                     id,
-                    time.strftime("%Y-%m-%d %H-%M-%S", time.localtime(round(timestamp))),
+                    time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(round(timestamp))),
                     nr_files,
                     comment,
                 )
