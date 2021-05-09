@@ -1,0 +1,244 @@
+.TH "UPDOC" "1" "2021-05-09" "Geek Central" "Misc"
+
+.SH NAME
+updoc \- manage versioned snapshots of one or more related files
+.SH SYNOPSIS
+.B updoc [cmd] [args ...]
+.br
+.SH DESCRIPTION
+.PP
+.B updoc
+is a command-line tool for saving copies of files in an
+.UR https://sqlite.org/
+SQLite
+.UE
+database. It implements a range of subcommands for creating a snapshot
+database, saving files from a specified directory into it, restoring files from it
+into a specified directory, and setting up filter rules.
+
+All file paths are saved relative to a specified base directory, and snapshots
+are saved using those same paths relative to a specified output base directory.
+
+Note that snapshots do not contain directories as such, only files in those
+directories.
+
+.SH OPTIONS
+
+The options depend on the particular command, as follows:
+
+.TP
+.B help [«cmd»]
+.br
+with «cmd», displays help for the specified command. If «cmd» is omitted,
+shows a list of valid commands.
+
+.TP
+.B init [\-\-nofilters] «dbname»
+.br
+initializes a new snapshot database. These are of two types: ones where
+the files to be saved are automatically chosen from the specified directory
+according to filter rules, or (if
+.BR \-\-nofilters
+is specified), ones where you explicitly specify the files to be saved in each
+snapshot.
+
+.TP
+.B showfilters «dbname»
+.br
+shows the filters currently attached to a database that uses filtering.
+Reports an error if the database does not use filtering.
+
+.TP
+.B setfilters «dbname» «filterdefs-filename»
+.br
+replaces the filters in
+.B «dbname»
+with those from the given file. The syntax of filter specs is explained in
+.B FILTER SYNTAX
+below.
+
+Reports an error if the database does not use filtering.
+
+.TP
+.B editfilters [\-\-editor=«editor»] «dbname»
+.br
+lets you interactively edit the filters attached to a database. The existing
+filters are written to a temporary file, which is then opened in the specified
+editor. After the command exits, the (possibly updated) contents of this file
+are reinstalled as the new filters. You can abort the edit by saving an empty
+file. To explicitly delete all filters, you can save a file containing just a
+single line beginning with “#” (comment).
+
+Reports an error if the database does not use filtering.
+
+.TP
+.B save [\-\-message=«message»] «dbname» «basedir»
+.TP
+.B save [\-\-message=«message»] «dbname» «basedir» «filespec» ...
+.br
+saves a snapshot into the specified database
+.BR «dbname» ,
+taking the files from
+.BR «basedir» ,
+optionally attaching a descriptive
+.BR «message» .
+The first form, without any
+.B «filespec»
+arguments, is used when filtering
+is in effect; the filters will be applied to the current contents of
+.B «basedir»
+to select the files for saving. The second form is used in lieu of filtering,
+to explicitly select the files to be saved (all
+.BR «filespec» s
+must be contained within
+.BR «basedir» ).
+
+.TP
+.B list [\-\-long|-l] «dbname»
+.br
+lists the snapshots previously saved to database
+.B «dbname» ,
+including their
+assigned snapshot ID, when they were taken and any descriptive message. Specifying
+.B \-\-long
+(which can be abbreviated to
+.BR \-l )
+includes details about each file that is part of a snapshot.
+
+.TP
+.B restore [\-\-overwrite|\-o] [\-\-preserve-timestamps|\-p] «dbname» «snapid» «basedir»
+.br
+restores the previously-saved snapshot from the database with id
+.B «snapid»
+into destination directory
+.BR «basedir».
+The
+.B \-\-overwrite
+option (which may be abbreviated to
+.BR -o )
+specifies what to do if a file being restored matches the name of one that
+already exists; if this is specified, the existing file is overwritten, otherwise
+an error is raised. The
+.B \-\-preserve-timestamps
+option (which may be abbreviated to
+.BR -p )
+indicates whether to restore the original last-modified date/time of each file
+as well; if not, it simply gets the current date/time.
+
+.TP
+.B delete [\-\-verbose|-v] «dbname» «snapid»
+.br
+deletes the previously-saved snapshot with the given ID from the snapshot
+database. The
+.B \-\-verbose
+option (which may be abbreviated to
+.BR -v )
+specifies whether to report on what is being done (including the possibility
+that nothing was done because no snapshot was found with that ID); otherwise,
+the operation proceeds quietly.
+
+.SH FILTER SYNTAX
+
+Filter specifications are given one to a line, in the form
+
+.RS 4
+.B «keyword» «filespec» [«filespec»...]
+.RE
+
+Each
+.B «filespec»
+may contain the usual shell-globbing wildcards “?” and “*”, which are interpreted
+when matching them against actual files during snapshot-saving operations.
+To prevent special interpretation of these, prefix them with a “\e” character.
+Backslash escapes can also be used to include spaces in a
+.B «filespec»
+as “\e ” (to prevent them from being interpreted as token separators), and the “\et” and
+“\en” forms can be used to include literal tabs and newlines in a filespec.
+
+Filespecs may contain “/” path separators, but may not begin with one; they are
+always interpreted relative to some directory.
+
+Valid
+.BR «keyword» s
+are
+
+.TP
+.B include «filespec» [«filespec»...]
+.br
+Takes one or more filespec arguments. Include files matching any of the filespecs
+relative to the base directory.
+
+.TP
+.B exclude «filespec» [«filespec»...]
+.br
+Takes one or more filespec arguments. Exclude files matching any of the filespecss
+relative to the base directory.
+
+.TP
+.B recursive-include «dirspec» «filespec» [«filespec»...]
+.br
+Takes at least two arguments, the first being interpreted as a directory spec
+relative to the base directory,
+and the rest as filespecs. Include files matching any of the filespec arguments
+at whatever level within the directory/directories.
+
+.TP
+.B recursive-exclude «dirspec» «filespec» [«filespec»...]
+.br
+Takes at least two arguments, the first being interpreted as a directory spec
+relative to the base directory,
+and the rest as filespecs. Exclude files matching any of the filespec arguments
+at whatever level within the directory/directories.
+
+.TP
+.B global-include «filespec» [«filespec»...]
+.br
+Takes one or more filespec arguments. Include files matching any of the filespecs
+wherever they occur in the base directory or in a lower-level directory.
+
+.TP
+.B global-exclude «filespec» [«filespec»...]
+.br
+Takes one or more filespec arguments. Exclude files matching any of the filespecs
+wherever they occur in the base directory or in a lower-level directory.
+
+.TP
+.B graft «dirspec» [«dirspec»...]
+.br
+Takes one or more arguments which are interpreted as directory specs relative to
+the base directory. Include files in any of those directories.
+
+.TP
+.B prune «dirspec» [«dirspec»...]
+.br
+Takes one or more arguments which are interpreted as directory specs relative to
+the base directory. Exclude files in any of those directories.
+
+.PP
+
+Rules are applied in the given order to each file found; the last one that applies
+takes effect. If no rule applies to a file, it is omitted.
+
+When reading filter definitions from a file, lines beginning with “\#” are ignored
+and can be used for comments. No filter entries are made in the database for such lines.
+
+.SH EXAMPLES
+
+.SS EXAMPLE FILTER RULES
+
+TBD
+
+.SS EXAMPLE COMMAND USAGE
+
+TBD
+
+.SH ENVIRONMENT
+
+.TP
+.B $EDITOR
+.br
+used to find the editor command to use for the
+.B editfilters
+subcommand, if the
+.B \-\-editor
+option is not specified.
