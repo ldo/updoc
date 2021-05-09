@@ -42,6 +42,17 @@ def db_iter(conn, cmd, mapfn = lambda x : x) :
     #end for
 #end db_iter
 
+def db_func(conn, funcname) :
+    "executes the named function in a select statement and returns its value."
+    result, = list(db_iter
+      (
+        conn,
+        "select %s()" % funcname,
+        mapfn = lambda x : x[0]
+      ))
+    return result
+#end db_func
+
 class DIRKIND(enum.Enum) :
     "how to interpret file/dir specs in filter rules."
     ROOT = 0 # interpret as spec relative to root dir
@@ -644,12 +655,7 @@ def cmd_save(args, opts) :
         %
             (sqlite.format_sql_value(message), str(snaptime))
       )
-    snapid, = list(db_iter
-      (
-        db,
-        "select last_insert_rowid()",
-        mapfn = lambda x : x[0]
-      ))
+    snapid = db_func(db, "last_insert_rowid")
     for item in to_save :
         sys.stdout.write("save %s\n" % item["path"])
         contents = open(os.path.join(basedir, item["path"]), "rb").read()
@@ -726,6 +732,52 @@ def cmd_restore(args, opts) :
     sys.stdout.write("%d files restored.\n" % nr_restored)
 #end cmd_restore
 
+def cmd_delete(args, opts) :
+    dbname, snapid = args
+    snapid = int(snapid)
+    verbose = "verbose" in opts
+    db = open_db(dbname, DB_OPEN.READWRITE)
+    if next(db_iter(db, "select id from snapshots where id = %d" % snapid), None) != None :
+        cu = db.cursor()
+        cu.execute("begin transaction")
+        for field, table in \
+            (
+                ("snapshot_id", "files"),
+                ("id", "snapshots"),
+            ) \
+        :
+            cu.execute \
+              (
+                    "delete from %(table)s where %(field)s = %(snapid)d"
+                %
+                    {
+                        "field" : field,
+                        "table" : table,
+                        "snapid" : snapid,
+                    }
+              )
+        #end for
+        cu.execute("delete from file_blobs where sha256hash not in (select sha256hash from files)")
+        blobs_deleted = db_func(db, "changes")
+        cu.execute("end transaction")
+        cu.execute("vacuum")
+        cu.close()
+        if verbose :
+            sys.stdout.write \
+              (
+                    "Snapshot with ID %d deleted from %s (%d file blobs deleted)\n"
+                %
+                    (snapid, dbname, blobs_deleted)
+              )
+        #end if
+    else :
+        if verbose :
+            sys.stdout.write("No snapshot with ID %d in %s\n" % (snapid, dbname))
+        #end if
+    #end if
+    db.close()
+#end cmd_delete
+
 recognized_commands = \
     {
 # key is command name, value is dictionary with following fields:
@@ -801,6 +853,15 @@ recognized_commands = \
                 "action" : cmd_restore,
                 "help_usage" : "«dbname» «snapid» «dest_dir»",
                 "help_descr" : "restores a previously-saved snapshot into a specified directory",
+            },
+
+        "delete" :
+            {
+                "args" : 2,
+                "opts" : ("verbose/v",),
+                "action" : cmd_delete,
+                "help_usage" : "[--verbose|-v] «dbname» «snapshot_id»",
+                "help_descr" : "deletes the snapshot with the specified ID from «dbname»",
             },
 
     } # recognized_commands
