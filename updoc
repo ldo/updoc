@@ -12,6 +12,8 @@ from hashlib import \
     sha256
 import re
 import time
+import subprocess
+import tempfile
 import fnmatch
 import getopt
 import apsw as sqlite
@@ -313,9 +315,12 @@ def parse_manifest(contents) :
 
 #begin parse_manifest
     result = []
+    had_comments = False
     for line in contents.split("\n") :
         line = line.lstrip()
-        if not line.startswith("#") :
+        if line.startswith("#") :
+            had_comments = True
+        else :
             items = tokenize_line(line)
             if len(items) != 0 :
                 keyword = items[0]
@@ -334,7 +339,7 @@ def parse_manifest(contents) :
         #end if
     #end for
     return \
-        result
+        result, had_comments
 #end parse_manifest
 
 def load_filters(db) :
@@ -394,6 +399,39 @@ def parse_filters(db) :
         #end for
     #end for
 #end parse_filters
+
+def set_filters(db, filters) :
+    "sets new filters on the specified snapshot database."
+    cu = db.cursor()
+    cu.execute("begin transaction")
+    for table in ("filter_item", "filter_rule") :
+        cu.execute("delete from %s" % table)
+    #end for
+    rule_index = 0
+    for items in filters :
+        rule_index += 1
+        action = items.pop(0)
+        cu.execute \
+          (
+                "insert into filter_rule(ordering, action) values(%d, %s)"
+            %
+                (rule_index, sqlite.format_sql_value(action))
+          )
+        item_index = 0
+        for item in items :
+            item_index += 1
+            cu.execute \
+              (
+                    "insert into filter_item(rule_ordering, item_ordering, pathspec)"
+                    " values (%d, %d, %s)"
+                %
+                    (rule_index, item_index, sqlite.format_sql_value(item))
+              )
+        #end for
+    #end for
+    cu.execute("end transaction")
+    cu.close()
+#end set_filters
 
 #+
 # Definitions of valid commands.
@@ -466,37 +504,9 @@ def cmd_init(args, opts) :
 
 def cmd_setfilters(args, opts) :
     dbname, filter_filename = args
-    filters = parse_manifest(open(filter_filename, "rt").read())
+    filters = parse_manifest(open(filter_filename, "rt").read())[0]
     db = open_db(dbname, DB_OPEN.READWRITE)
-    cu = db.cursor()
-    cu.execute("begin transaction")
-    for table in ("filter_item", "filter_rule") :
-        cu.execute("delete from %s" % table)
-    #end for
-    rule_index = 0
-    for items in filters :
-        rule_index += 1
-        action = items.pop(0)
-        cu.execute \
-          (
-                "insert into filter_rule(ordering, action) values(%d, %s)"
-            %
-                (rule_index, sqlite.format_sql_value(action))
-          )
-        item_index = 0
-        for item in items :
-            item_index += 1
-            cu.execute \
-              (
-                    "insert into filter_item(rule_ordering, item_ordering, pathspec)"
-                    " values (%d, %d, %s)"
-                %
-                    (rule_index, item_index, sqlite.format_sql_value(item))
-              )
-        #end for
-    #end for
-    cu.execute("end transaction")
-    cu.close()
+    set_filters(db, filters)
     db.close()
 #end cmd_setfilters
 
@@ -513,6 +523,53 @@ def cmd_showfilters(args, opts) :
     #end if
     db.close()
 #end cmd_showfilters
+
+def cmd_editfilters(args, opts) :
+    dbname, = args
+    editor = opts.get("editor")
+    if editor == None :
+        editor = os.environ.get("EDITOR")
+    #end if
+    if editor == None :
+        raise getopt.GetoptError("no --editor or $EDITOR specified")
+    #end if
+    db = open_db(dbname, DB_OPEN.READWRITE)
+    tempfiltersfd, tempfiltersname = tempfile.mkstemp(prefix = "updoc-", suffix = "-filters")
+    os.ftruncate(tempfiltersfd, 0)
+    os.write \
+      (
+        tempfiltersfd,
+        b"".join
+          (
+            (" ".join([action] + items) + "\n").encode()
+            for action, items in load_filters(db)
+          )
+      )
+    status = subprocess.call \
+      (
+        args = (editor, tempfiltersname),
+      )
+    if status != 0 :
+        sys.stdout.write("editor %s terminated with status %d -- edit aborted\n" % (editor, status))
+    else :
+        new_rules_len = os.lseek(tempfiltersfd, 0, os.SEEK_END)
+        os.lseek(tempfiltersfd, 0, os.SEEK_SET)
+        filters, had_comments = parse_manifest(os.read(tempfiltersfd, new_rules_len).decode())
+        if len(filters) != 0 or had_comments :
+            set_filters(db, filters)
+            if len(filters) != 0 :
+                sys.stdout.write("%d new filters installed\n" % len(filters))
+            else :
+                sys.stdout.write("all existing filters deleted\n")
+            #end if
+        else :
+            sys.stdout.write("edit aborted\n")
+        #end if
+    #end if
+    db.close()
+    os.unlink(tempfiltersname)
+    os.close(tempfiltersfd)
+#end cmd_editfilters
 
 def cmd_list(args, opts) :
     dbname, = args
@@ -824,6 +881,16 @@ recognized_commands = \
                 "action" : cmd_showfilters,
                 "help_usage" : "«dbname»",
                 "help_descr" : "shows the current snapshot filters for «dbname»",
+            },
+
+        "editfilters" :
+            {
+                "args" : 1,
+                "opts" : ("editor=",),
+                "action" : cmd_editfilters,
+                "help_usage" : "[--editor=«editor»] «dbname»",
+                "help_descr" :
+                    "lets you interactively edit the filters for the snapshot database «dbname»",
             },
 
         "list" :
