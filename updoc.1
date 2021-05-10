@@ -4,7 +4,6 @@
 updoc \- manage versioned snapshots of one or more related files
 .SH SYNOPSIS
 .B updoc [cmd] [args ...]
-.br
 .SH DESCRIPTION
 .PP
 .B updoc
@@ -28,13 +27,11 @@ The options depend on the particular command, as follows:
 
 .TP
 .B help [«cmd»]
-.br
 with «cmd», displays help for the specified command. If «cmd» is omitted,
 shows a list of valid commands.
 
 .TP
 .B init [\-\-nofilters] «dbname»
-.br
 initializes a new snapshot database. These are of two types: ones where
 the files to be saved are automatically chosen from the specified directory
 according to filter rules, or (if
@@ -44,13 +41,11 @@ snapshot.
 
 .TP
 .B showfilters «dbname»
-.br
 shows the filters currently attached to a database that uses filtering.
 Reports an error if the database does not use filtering.
 
 .TP
 .B setfilters «dbname» «filterdefs-filename»
-.br
 replaces the filters in
 .B «dbname»
 with those from the given file. The syntax of filter specs is explained in
@@ -61,7 +56,6 @@ Reports an error if the database does not use filtering.
 
 .TP
 .B editfilters [\-\-editor=«editor»] «dbname»
-.br
 lets you interactively edit the filters attached to a database. The existing
 filters are written to a temporary file, which is then opened in the specified
 editor. After the command exits, the (possibly updated) contents of this file
@@ -75,7 +69,6 @@ Reports an error if the database does not use filtering.
 .B save [\-\-message=«message»] «dbname» «basedir»
 .TP
 .B save [\-\-message=«message»] «dbname» «basedir» «filespec» ...
-.br
 saves a snapshot into the specified database
 .BR «dbname» ,
 taking the files from
@@ -95,7 +88,6 @@ must be contained within
 
 .TP
 .B list [\-\-long|-l] «dbname»
-.br
 lists the snapshots previously saved to database
 .B «dbname» ,
 including their
@@ -107,7 +99,6 @@ includes details about each file that is part of a snapshot.
 
 .TP
 .B restore [\-\-overwrite|\-o] [\-\-preserve-timestamps|\-p] «dbname» «snapid» «basedir»
-.br
 restores the previously-saved snapshot from the database with id
 .B «snapid»
 into destination directory
@@ -127,7 +118,6 @@ as well; if not, it simply gets the current date/time.
 
 .TP
 .B delete [\-\-verbose|-v] «dbname» «snapid»
-.br
 deletes the previously-saved snapshot with the given ID from the snapshot
 database. The
 .B \-\-verbose
@@ -164,19 +154,16 @@ are
 
 .TP
 .B include «filespec» [«filespec»...]
-.br
 Takes one or more filespec arguments. Include files matching any of the filespecs
 relative to the base directory.
 
 .TP
 .B exclude «filespec» [«filespec»...]
-.br
 Takes one or more filespec arguments. Exclude files matching any of the filespecss
 relative to the base directory.
 
 .TP
 .B recursive-include «dirspec» «filespec» [«filespec»...]
-.br
 Takes at least two arguments, the first being interpreted as a directory spec
 relative to the base directory,
 and the rest as filespecs. Include files matching any of the filespec arguments
@@ -184,7 +171,6 @@ at whatever level within the directory/directories.
 
 .TP
 .B recursive-exclude «dirspec» «filespec» [«filespec»...]
-.br
 Takes at least two arguments, the first being interpreted as a directory spec
 relative to the base directory,
 and the rest as filespecs. Exclude files matching any of the filespec arguments
@@ -192,25 +178,21 @@ at whatever level within the directory/directories.
 
 .TP
 .B global-include «filespec» [«filespec»...]
-.br
 Takes one or more filespec arguments. Include files matching any of the filespecs
 wherever they occur in the base directory or in a lower-level directory.
 
 .TP
 .B global-exclude «filespec» [«filespec»...]
-.br
 Takes one or more filespec arguments. Exclude files matching any of the filespecs
 wherever they occur in the base directory or in a lower-level directory.
 
 .TP
 .B graft «dirspec» [«dirspec»...]
-.br
 Takes one or more arguments which are interpreted as directory specs relative to
 the base directory. Include files in any of those directories.
 
 .TP
 .B prune «dirspec» [«dirspec»...]
-.br
 Takes one or more arguments which are interpreted as directory specs relative to
 the base directory. Exclude files in any of those directories.
 
@@ -236,7 +218,6 @@ TBD
 
 .TP
 .B $EDITOR
-.br
 used to find the editor command to use for the
 .B editfilters
 subcommand, if the
