@@ -249,7 +249,72 @@ probably makes the program unsuitable for dealing with very large files.
 
 .SS EXAMPLE FILTER RULES
 
-TBD
+.PP
+.B include *.c
+.br
+
+Includes all files ending with
+.B .c
+at the top level of the base directory.
+
+.PP
+.B recursive-include src *.c *.py
+.br
+
+Includes all files ending with
+.B .c
+or
+.B .py
+in the
+.B src
+subdirectory and all directories within it.
+
+.PP
+.B include src/*.c src/*.py
+
+Includes all files ending with
+.B .c
+or
+.B .py
+at the top level of the
+.B src
+subdirectory only.
+
+.PP
+.B graft src
+
+Includes all files within the
+.B src
+subdirectory down to all levels.
+
+.PP
+.B prune build-temp
+
+Excludes all files in the
+.B build-temp
+subdirectory down to all levels. (Perhaps it contains temporarily-generated
+.B .c
+files which are to be excluded from the snapshot.)
+
+.PP
+.B global-include *.py
+.br
+.B global-exclude _*.py
+.br
+.B include __init__.py
+
+Includes all files with names ending with
+.BR .py ,
+at all levels within the base directory, including the top-level
+.B __init__.py
+but
+.I excluding
+other files with names beginning with an underscore at the top level as well as other
+levels. The second rule excludes names
+beginning with an underscore from being included by the first rule, and the third rule
+puts back the top-level
+.B __init__.py
+for inclusion.
 
 .SS EXAMPLE COMMAND USAGE
 
