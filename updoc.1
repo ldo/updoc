@@ -242,6 +242,51 @@ save remaining within it. However, the restore operation could end up leaving a
 partial restore if, for example, a file already existed and the \-\-overwrite option
 was not specified.
 
+.SS WHY NOT VERSION CONTROL?
+
+Version-control systems like
+.UR https://git-scm.com/
+Git
+.UE
+are popular among software developers. Their strength lies in keeping track of
+differences between states of files at different times. Git in particular offers
+powerful branching and merging facilities, to facilitate parallel development
+of the same project along different paths. For example, the “stable” branch
+could be for maintaining the current release, with no new features allowed,
+while a separate “testing” branch would be used for developing the next release,
+with new enhancements going in on a daily basis, followed by fixes as the bugs
+are wrung out of those enhancements.
+
+But as bugs are found and fixed in the “stable” branch, many of these will likely
+also need to be retrofitted to the “testing” branch, which is where merging
+comes in. In the process of merging, conflicts might arise where both branches
+have made changes to the same source file, which will require hand-editing to fix up.
+
+Such a process depends crucially on the files concerned being human-readable
+.I text
+files. Trying to keep track of changes between different versions of
+.I binary
+files, and worse still, trying to merge changes and fix merge conflicts between
+them, is essentially a hopeless task.
+
+Thus,
+.B updoc
+simply avoids the whole issue. It concentrates purely on saving versions of files
+at particular points in time, no more. It doesn’t try to organize a succession
+of snapshots into a “branch”, it has no concept of tracking differences between
+successive versions, and naturally the idea of merging different branches doesn’t
+even arise. The user can attach an explanatory message to each snapshot, and in
+the absence of any file-format-specific tools that might exist for analyzing the data, that is
+all the information you have about what has changed in each snapshot.
+
+There is no parent-child relationship between snapshots, as there is between commits
+in Git. For example, in Git, it is not (practically) possible to go back and
+change a commit in some way (such as amending the commit message) without having
+to regenerate all subsequent commits in the branch. In
+.BR updoc ,
+on the other hand, prior snapshots can be individually edited and even deleted at any time,
+without any impact on later ones.
+
 .SH BUGS
 
 File contents are loaded in their entirety into memory for saving and restoring. This
