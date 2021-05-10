@@ -484,7 +484,10 @@ def get_filespecs_to_save(basedir, filespecs) :
     to_save = list(os.path.abspath(f) for f in filespecs)
     invalid = list(f for f in to_save if not f.startswith(basedir + "/"))
     if len(invalid) != 0 :
-        raise getopt.GetoptError("filespecs to save outside basedir %s: %s\n" % (basedir, ", ".join(invalid)))
+        raise getopt.GetoptError \
+          (
+            "filespecs to save outside basedir %s: %s\n" % (basedir, ", ".join(invalid))
+          )
     #end if
     info = dict((f, os.lstat(f)) for f in to_save)
     invalid = list(f for f in to_save if not stat.S_ISREG(info[f].st_mode))
@@ -516,7 +519,8 @@ def save_files(cu, snapid, basedir, to_save, doit) :
               )
             cu.execute \
               (
-                    "insert into files(snapshot_id, path, timestamp, sha256hash) values(%d, %s, %s, %s)"
+                    "insert into files(snapshot_id, path, timestamp, sha256hash)"
+                    " values(%d, %s, %s, %s)"
                 %
                     (
                         snapid,
@@ -887,7 +891,9 @@ def cmd_unsave(args, opts) :
     if len(to_delete) != 0 :
         sys.stdout.write \
           (
-            "%sdelete files[%d]: %s\n" % (("would ", "")[doit], len(to_delete), ", ".join(repr(f) for f in to_delete))
+                "%sdelete files[%d]: %s\n"
+            %
+                (("would ", "")[doit], len(to_delete), ", ".join(repr(f) for f in to_delete))
           )
         if doit :
             cu.execute \
@@ -1004,6 +1010,84 @@ def cmd_delete(args, opts) :
     db.close()
 #end cmd_delete
 
+def cmd_copy(args, opts) :
+    db1name, snapids, db2name = args
+    snapids = list(int(s) for s in snapids.split(","))
+    db1 = open_db(db1name, DB_OPEN.READONLY)
+    db2 = open_db(db2name, DB_OPEN.READWRITE)
+    verbose = "verbose" in opts
+    nr_snaps = 0
+    for srcsnapid in snapids :
+        srcsnap = list(db_iter
+            (db1, "select comment, timestamp from snapshots where id = %d" % srcsnapid))
+        if len(srcsnap) != 1 :
+            raise getopt.GetoptError("no snapshot with ID %d in %s" % (srcsnapid, db1name))
+        #end if
+        message, snaptime = srcsnap[0]
+        cu2 = db2.cursor()
+        cu2.execute("begin transaction")
+        cu2.execute \
+          (
+                "insert into snapshots(comment, timestamp) values(%s, %s)"
+            %
+                (sqlite.format_sql_value(message), str(snaptime))
+          )
+        dstsnapid = db_func(db2, "last_insert_rowid")
+        if verbose :
+            sys.stdout.write("* copy %s[%d] => %s[%d]\n" % (db1name, srcsnapid, db2name, dstsnapid))
+        #end if
+        nr_files = 0
+        for childname, timestamp, contents, contents_hash in db_iter \
+          (
+            db1,
+                "select files.path, files.timestamp, file_blobs.contents, files.sha256hash"
+                " from snapshots inner join files on snapshots.id = files.snapshot_id"
+                " left join file_blobs on files.sha256hash = file_blobs.sha256hash"
+                " where snapshots.id = %d"
+            %
+                srcsnapid
+          ) \
+        :
+            if verbose :
+                sys.stdout.write("  copy %s (%d bytes)\n" % (childname, len(contents)))
+            #end if
+            assert contents != None
+            cu2.execute \
+              (
+                    "insert or ignore into file_blobs(contents, sha256hash) values(%s, %s)"
+                %
+                    (
+                        sqlite.format_sql_value(contents),
+                        sqlite.format_sql_value(contents_hash),
+                    )
+              )
+            cu2.execute \
+              (
+                    "insert into files(snapshot_id, path, timestamp, sha256hash)"
+                    " values(%d, %s, %s, %s)"
+                %
+                    (
+                        dstsnapid,
+                        sqlite.format_sql_value(childname),
+                        str(timestamp),
+                        sqlite.format_sql_value(contents_hash),
+                    )
+              )
+            nr_files += 1
+        #end for
+        cu2.execute("end transaction")
+        if verbose :
+            sys.stdout.write("  files copied: %d\n" % nr_files)
+        #end if
+        nr_snaps += 1
+    #end for
+    if verbose :
+        sys.stdout.write("Snapshots copied: %d\n" % nr_snaps)
+    #end if
+    db1.close()
+    db2.close()
+#end cmd_copy
+
 recognized_commands = \
     {
 # key is command name, value is dictionary with following fields:
@@ -1105,7 +1189,8 @@ recognized_commands = \
                 "args" : 3,
                 "opts" : ("dry-run", "overwrite/o", "preserve-timestamps/p",),
                 "action" : cmd_restore,
-                "help_usage" : "[--overwrite|-o] [--preserve-timestamps|-p] «dbname» «snapid» «dest_dir»",
+                "help_usage" :
+                    "[--overwrite|-o] [--preserve-timestamps|-p] «dbname» «snapid» «dest_dir»",
                 "help_descr" : "restores a previously-saved snapshot into a specified directory",
             },
 
@@ -1116,6 +1201,15 @@ recognized_commands = \
                 "action" : cmd_delete,
                 "help_usage" : "[--verbose|-v] «dbname» «snapshot_id»",
                 "help_descr" : "deletes the snapshot with the specified ID from «dbname»",
+            },
+
+        "copy" :
+            {
+                "args" : 3,
+                "opts" : ("verbose/v",),
+                "action" : cmd_copy,
+                "help_usage" : "«db1name» «snapid»[,«snapid»...] «db2name»",
+                "help_descr" : "copies the specified snapshots from one database to another",
             },
 
     } # recognized_commands

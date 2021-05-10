@@ -141,6 +141,15 @@ specifies whether to report on what is being done (including the possibility
 that nothing was done because no snapshot was found with that ID); otherwise,
 the operation proceeds quietly.
 
+.TP
+.B copy [\-\-verbose|-v] «db1name» «snapids» «db2name»
+copies one or more snapshots from one snapshot database to another.
+.B «snapids»
+is a comma-separated list of the snapshot IDs in database
+.B «db1name»
+to be copied to
+.BR «db2name» .
+
 .SH FILTER SYNTAX
 
 Filter specifications are given one to a line, in the form
