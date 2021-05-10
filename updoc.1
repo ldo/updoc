@@ -17,6 +17,8 @@ into a specified directory, and setting up filter rules.
 
 All file paths are saved relative to a specified base directory, and snapshots
 are saved using those same paths relative to a specified output base directory.
+Since the base directory is always specified as part of the command, this allows
+a snapshot to be saved from one directory and restored to a different directory.
 
 Note that snapshots do not contain directories as such, only files in those
 directories.
