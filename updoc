@@ -699,11 +699,9 @@ def cmd_list(args, opts) :
 def cmd_save(args, opts) :
     dbname, basedir = args[0:2]
     filespecs = args[2:]
+    basedir = os.path.abspath(basedir)
     if not stat.S_ISDIR(os.lstat(basedir).st_mode) :
         raise ValueError("not a directory: “%s”" % basedir)
-    #end if
-    if basedir != "/" and basedir.endswith("/") :
-        basedir = basedir[:-1]
     #end if
     message = opts.get("message", "")
     db = open_db(dbname, DB_OPEN.READWRITE)
@@ -752,7 +750,7 @@ def cmd_save(args, opts) :
                 "this database does not use filter rules -- explicit filespecs are required"
               )
         #end if
-        to_save = list(os.path.normpath(f) for f in filespecs)
+        to_save = list(os.path.abspath(f) for f in filespecs)
         invalid = list(f for f in to_save if not f.startswith(basedir + "/"))
         if len(invalid) != 0 :
             raise getopt.GetoptError("filespecs to save outside basedir: %s\n" % ", ".join(invalid))
