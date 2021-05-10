@@ -499,31 +499,33 @@ def get_filespecs_to_save(basedir, filespecs) :
     return to_save
 #end get_filespecs_to_save
 
-def save_files(cu, snapid, basedir, to_save) :
+def save_files(cu, snapid, basedir, to_save, doit) :
     for item in to_save :
-        sys.stdout.write("save %s\n" % item["path"])
-        contents = open(os.path.join(basedir, item["path"]), "rb").read()
-        contents_hash = sha256(contents).hexdigest()
-        cu.execute \
-          (
-                "insert or ignore into file_blobs(contents, sha256hash) values(%s, %s)"
-            %
-                (
-                    sqlite.format_sql_value(contents),
-                    sqlite.format_sql_value(contents_hash),
-                )
-          )
-        cu.execute \
-          (
-                "insert into files(snapshot_id, path, timestamp, sha256hash) values(%d, %s, %s, %s)"
-            %
-                (
-                    snapid,
-                    sqlite.format_sql_value(item["path"]),
-                    str(item["timestamp"]),
-                    sqlite.format_sql_value(contents_hash),
-                )
-          )
+        sys.stdout.write("%ssave %s\n" % (("would ", "")[doit], item["path"]))
+        if doit :
+            contents = open(os.path.join(basedir, item["path"]), "rb").read()
+            contents_hash = sha256(contents).hexdigest()
+            cu.execute \
+              (
+                    "insert or ignore into file_blobs(contents, sha256hash) values(%s, %s)"
+                %
+                    (
+                        sqlite.format_sql_value(contents),
+                        sqlite.format_sql_value(contents_hash),
+                    )
+              )
+            cu.execute \
+              (
+                    "insert into files(snapshot_id, path, timestamp, sha256hash) values(%d, %s, %s, %s)"
+                %
+                    (
+                        snapid,
+                        sqlite.format_sql_value(item["path"]),
+                        str(item["timestamp"]),
+                        sqlite.format_sql_value(contents_hash),
+                    )
+              )
+        #end if
     #end for
 #end save_files
 
@@ -774,6 +776,7 @@ def cmd_save(args, opts) :
         raise ValueError("not a directory: “%s”" % basedir)
     #end if
     message = opts.get("message", "")
+    doit = "dry-run" not in opts
     db = open_db(dbname, DB_OPEN.READWRITE)
     if has_filtering(db) :
         if len(filespecs) != 0 :
@@ -810,21 +813,32 @@ def cmd_save(args, opts) :
     cu = db.cursor()
     cu.execute("begin transaction")
     snaptime = time.time()
-    cu.execute \
-      (
-            "insert into snapshots(comment, timestamp) values(%s, %s)"
-        %
-            (sqlite.format_sql_value(message), str(snaptime))
-      )
-    snapid = db_func(db, "last_insert_rowid")
-    save_files(cu, snapid, basedir, to_save)
+    if doit :
+        cu.execute \
+          (
+                "insert into snapshots(comment, timestamp) values(%s, %s)"
+            %
+                (sqlite.format_sql_value(message), str(snaptime))
+          )
+        snapid = db_func(db, "last_insert_rowid")
+    else :
+        snapid = None
+    #end if
+    save_files(cu, snapid, basedir, to_save, doit)
     cu.execute("end transaction")
     cu.close()
     db.close()
-    sys.stdout.write \
-      (
-        "%d files saved in snapshot ID %d\n" % (len(to_save), snapid)
-      )
+    if doit :
+        sys.stdout.write \
+          (
+            "%d files saved in snapshot ID %d\n" % (len(to_save), snapid)
+          )
+    else :
+        sys.stdout.write \
+          (
+            "%d files would have been saved\n" % len(to_save)
+          )
+    #end if
 #end cmd_save
 
 def cmd_save_more(args, opts) :
@@ -832,6 +846,7 @@ def cmd_save_more(args, opts) :
     snapid = int(snapid)
     basedir = os.path.abspath(basedir)
     filespecs = args[3:]
+    doit = "dry-run" not in opts
     db = open_db(dbname, DB_OPEN.READWRITE)
     if has_filtering(db) :
         raise getopt.GetoptError("filtering rules in effect, no explicit filespecs allowed")
@@ -842,7 +857,7 @@ def cmd_save_more(args, opts) :
     to_save = get_filespecs_to_save(basedir, filespecs)
     cu = db.cursor()
     cu.execute("begin transaction")
-    save_files(cu, snapid, basedir, to_save)
+    save_files(cu, snapid, basedir, to_save, doit)
     cu.execute("end transaction")
     cu.close()
     db.close()
@@ -853,6 +868,7 @@ def cmd_unsave(args, opts) :
     snapid = int(snapid)
     filespecs = args[2:]
     rules = list((True, parse_wildcard("", f)) for f in filespecs)
+    doit = "dry-run" not in opts
     db = open_db(dbname, DB_OPEN.READWRITE)
     cu = db.cursor()
     cu.execute("begin transaction")
@@ -871,19 +887,21 @@ def cmd_unsave(args, opts) :
     if len(to_delete) != 0 :
         sys.stdout.write \
           (
-            "delete files[%d]: %s\n" % (len(to_delete), ", ".join(repr(f) for f in to_delete))
+            "%sdelete files[%d]: %s\n" % (("would ", "")[doit], len(to_delete), ", ".join(repr(f) for f in to_delete))
           )
-        cu.execute \
-          (
-                "delete from files where snapshot_id = %d and path in (%s)"
-            %
-                (
-                    snapid,
-                    ", ".join(sqlite.format_sql_value(f) for f in to_delete)
-                )
-          )
-        cu.execute("delete from file_blobs where sha256hash not in (select sha256hash from files)")
-        blobs_deleted = db_func(db, "changes")
+        if doit :
+            cu.execute \
+              (
+                    "delete from files where snapshot_id = %d and path in (%s)"
+                %
+                    (
+                        snapid,
+                        ", ".join(sqlite.format_sql_value(f) for f in to_delete)
+                    )
+              )
+            cu.execute("delete from file_blobs where sha256hash not in (select sha256hash from files)")
+            blobs_deleted = db_func(db, "changes")
+        #end if
     else :
         sys.stdout.write("delete files: none.\n")
     #end if
@@ -900,6 +918,7 @@ def cmd_restore(args, opts) :
     snapid = int(snapid)
     preserve_timestamps = "preserve-timestamps" in opts
     overwrite = "overwrite" in opts
+    doit = "dry-run" not in opts
     db = open_db(dbname, DB_OPEN.READONLY)
     if not stat.S_ISDIR(os.lstat(destdir).st_mode) :
         raise ValueError("not a directory: “%s”" % basedir)
@@ -919,22 +938,24 @@ def cmd_restore(args, opts) :
       ) \
     :
         assert contents != None
-        sys.stdout.write("restore %s\n" % childname)
+        sys.stdout.write("%srestore %s\n" % (("would ", "")[doit], childname))
         childpath = os.path.join(destdir, childname)
         if not overwrite and os.path.exists(childpath) :
             raise FileExistsError("dest file “%s” already exists in %s" % (childname, destdir))
         #end if
-        os.makedirs(os.path.split(childpath)[0], exist_ok = True)
-        childfile = open(childpath, "wb")
-        childfile.write(contents)
-        childfile.close()
-        if preserve_timestamps :
-            os.utime(childpath, (timestamp, timestamp))
+        if doit :
+            os.makedirs(os.path.split(childpath)[0], exist_ok = True)
+            childfile = open(childpath, "wb")
+            childfile.write(contents)
+            childfile.close()
+            if preserve_timestamps :
+                os.utime(childpath, (timestamp, timestamp))
+            #end if
         #end if
         nr_restored += 1
     #end for
     db.close()
-    sys.stdout.write("%d files restored.\n" % nr_restored)
+    sys.stdout.write("%d files %srestored.\n" % (nr_restored, ("would have been ", "")[doit]))
 #end cmd_restore
 
 def cmd_delete(args, opts) :
@@ -1053,7 +1074,7 @@ recognized_commands = \
         "save" :
             {
                 "args" : (2, math.inf),
-                "opts" : ("message/m=",),
+                "opts" : ("dry-run", "message/m=",),
                 "action" : cmd_save,
                 "help_usage" : "[--message=«message»] «dbname» «base_dir» [«file»...]",
                 "help_descr" :
@@ -1064,7 +1085,7 @@ recognized_commands = \
         "save-more" :
             {
                 "args" : (4, math.inf),
-                "opts" : (),
+                "opts" : ("dry-run",),
                 "action" : cmd_save_more,
                 "help_usage" : "«dbname» «snapid» «base_dir» «file» [«file»...]",
                 "help_descr" : "adds more files matching the given filespecs to a snapshot",
@@ -1073,7 +1094,7 @@ recognized_commands = \
         "unsave" :
             {
                 "args" : (3, math.inf),
-                "opts" : (),
+                "opts" : ("dry-run",),
                 "action" : cmd_unsave,
                 "help_usage" : "«dbname» «snapid» «filespec» [«filespec»...]",
                 "help_descr" : "removes saved files matching the given filespecs from a snapshot",
@@ -1082,7 +1103,7 @@ recognized_commands = \
         "restore" :
             {
                 "args" : 3,
-                "opts" : ("overwrite/o", "preserve-timestamps/p",),
+                "opts" : ("dry-run", "overwrite/o", "preserve-timestamps/p",),
                 "action" : cmd_restore,
                 "help_usage" : "[--overwrite|-o] [--preserve-timestamps|-p] «dbname» «snapid» «dest_dir»",
                 "help_descr" : "restores a previously-saved snapshot into a specified directory",
