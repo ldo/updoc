@@ -352,6 +352,9 @@ def parse_manifest(contents) :
                 if any(item.startswith("/") for item in items) :
                     raise ValueError("relative pathspecs only: “%s”" % line)
                 #end if
+                if any(".." in item.split("/") for item in items) :
+                    raise ValueError("no uplevel references in pathspecs: “%s”" % line)
+                #end if
                 if len(items) < action.min_args + 1 :
                     raise ValueError("%s for %s" % (action.msg_required_args, keyword))
                 #end if
