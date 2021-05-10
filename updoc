@@ -622,7 +622,7 @@ def cmd_list(args, opts) :
             snap = next(iter_snaps, None)
             if snap != None :
                 snap_id, comment, snap_timestamp, filepath, file_timestamp, file_size = snap
-                assert file_size != None
+                assert filepath == None or file_size != None
             else :
                 snap_id = None
             #end if
@@ -640,18 +640,22 @@ def cmd_list(args, opts) :
                 last_snap_id = snap_id
                 nr_files = total_size = 0
             #end if
-            sys.stdout.write \
-              (
-                    "  %10d %19s %s\n"
-                %
-                    (
-                        file_size,
-                        format_timestamp(file_timestamp),
-                        filepath,
-                    )
-              )
-            total_size += file_size
-            nr_files += 1
+            if filepath == None :
+                sys.stdout.write("  (No files)\n")
+            else :
+                sys.stdout.write \
+                  (
+                        "  %10d %19s %s\n"
+                    %
+                        (
+                            file_size,
+                            format_timestamp(file_timestamp),
+                            filepath,
+                        )
+                  )
+                total_size += file_size
+                nr_files += 1
+            #end if
         #end while
     else :
         for id, comment, timestamp, nr_files in db_iter \
