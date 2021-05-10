@@ -87,6 +87,20 @@ must be contained within
 .BR «basedir» ).
 
 .TP
+.B save-more «dbname» «snapid» «basedir» «filespec» ...
+adds more files to an existing snapshot. The given snapshot database must not
+have filtering in effect.
+
+.TP
+.B unsave «dbname» «snapid» «filespec» ...
+removes files matching the given
+.BR «filespec» s
+from the specified snapshot. The
+.BR «filespec» s
+can contain wildcards to match multiple files; these will need to be escaped
+to prevent the shell expanding them.
+
+.TP
 .B list [\-\-long|-l] «dbname»
 lists the snapshots previously saved to database
 .B «dbname» ,
