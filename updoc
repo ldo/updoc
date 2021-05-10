@@ -457,6 +457,76 @@ def set_filters(db, filters) :
     cu.close()
 #end set_filters
 
+def filter_says_include(pathspec, rules) :
+    i = len(rules)
+    while True :
+        if i == 0 :
+            includeit = False
+            break
+        #end if
+        i -= 1
+        do_include, matching = rules[i]
+        if matching.search(pathspec) != None :
+            includeit = do_include
+            break
+        #end if
+    #end while
+    return includeit
+#end filter_says_include
+
+def get_filespecs_to_save(basedir, filespecs) :
+    if len(filespecs) == 0 :
+        raise getopt.GetoptError \
+          (
+            "this database does not use filter rules -- explicit filespecs are required"
+          )
+    #end if
+    to_save = list(os.path.abspath(f) for f in filespecs)
+    invalid = list(f for f in to_save if not f.startswith(basedir + "/"))
+    if len(invalid) != 0 :
+        raise getopt.GetoptError("filespecs to save outside basedir %s: %s\n" % (basedir, ", ".join(invalid)))
+    #end if
+    info = dict((f, os.lstat(f)) for f in to_save)
+    invalid = list(f for f in to_save if not stat.S_ISREG(info[f].st_mode))
+    if len(invalid) != 0 :
+        raise getopt.GetoptError("not regular files: %s\n" % ", ".join(invalid))
+    #end if
+    to_save = list \
+      (
+        {"path" : f[len(basedir) + 1:], "timestamp" : info[f].st_mtime}
+        for f in to_save
+      )
+    return to_save
+#end get_filespecs_to_save
+
+def save_files(cu, snapid, basedir, to_save) :
+    for item in to_save :
+        sys.stdout.write("save %s\n" % item["path"])
+        contents = open(os.path.join(basedir, item["path"]), "rb").read()
+        contents_hash = sha256(contents).hexdigest()
+        cu.execute \
+          (
+                "insert or ignore into file_blobs(contents, sha256hash) values(%s, %s)"
+            %
+                (
+                    sqlite.format_sql_value(contents),
+                    sqlite.format_sql_value(contents_hash),
+                )
+          )
+        cu.execute \
+          (
+                "insert into files(snapshot_id, path, timestamp, sha256hash) values(%d, %s, %s, %s)"
+            %
+                (
+                    snapid,
+                    sqlite.format_sql_value(item["path"]),
+                    str(item["timestamp"]),
+                    sqlite.format_sql_value(contents_hash),
+                )
+          )
+    #end for
+#end save_files
+
 #+
 # Definitions of valid commands.
 #
@@ -720,20 +790,7 @@ def cmd_save(args, opts) :
                 childname = os.path.join(basename, item)
                 info = os.lstat(childitem)
                 if stat.S_ISREG(info.st_mode) :
-                    i = len(rules)
-                    while True :
-                        if i == 0 :
-                            includeit = False
-                            break
-                        #end if
-                        i -= 1
-                        do_include, matching = rules[i]
-                        if matching.search(childname) != None :
-                            includeit = do_include
-                            break
-                        #end if
-                    #end while
-                    if includeit :
+                    if filter_says_include(childname, rules) :
                         result.append({"path" : childname, "timestamp" : info.st_mtime})
                     #end if
                 elif stat.S_ISDIR(info.st_mode) :
@@ -744,27 +801,7 @@ def cmd_save(args, opts) :
         #end get_files
         to_save = get_files(basedir, "")
     else :
-        if len(filespecs) == 0 :
-            raise getopt.GetoptError \
-              (
-                "this database does not use filter rules -- explicit filespecs are required"
-              )
-        #end if
-        to_save = list(os.path.abspath(f) for f in filespecs)
-        invalid = list(f for f in to_save if not f.startswith(basedir + "/"))
-        if len(invalid) != 0 :
-            raise getopt.GetoptError("filespecs to save outside basedir: %s\n" % ", ".join(invalid))
-        #end if
-        info = dict((f, os.lstat(f)) for f in to_save)
-        invalid = list(f for f in to_save if not stat.S_ISREG(info[f].st_mode))
-        if len(invalid) != 0 :
-            raise getopt.GetoptError("not regular files: %s\n" % ", ".join(invalid))
-        #end if
-        to_save = list \
-          (
-            {"path" : f[len(basedir) + 1:], "timestamp" : info[f].st_mtime}
-            for f in to_save
-          )
+        to_save = get_filespecs_to_save(basedir, filespecs)
     #end if
     sys.stdout.write("files to save: %s\n" % repr(to_save)) # debug
     if len(to_save) == 0 :
@@ -780,31 +817,7 @@ def cmd_save(args, opts) :
             (sqlite.format_sql_value(message), str(snaptime))
       )
     snapid = db_func(db, "last_insert_rowid")
-    for item in to_save :
-        sys.stdout.write("save %s\n" % item["path"])
-        contents = open(os.path.join(basedir, item["path"]), "rb").read()
-        contents_hash = sha256(contents).hexdigest()
-        cu.execute \
-          (
-                "insert or ignore into file_blobs(contents, sha256hash) values(%s, %s)"
-            %
-                (
-                    sqlite.format_sql_value(contents),
-                    sqlite.format_sql_value(contents_hash),
-                )
-          )
-        cu.execute \
-          (
-                "insert into files(snapshot_id, path, timestamp, sha256hash) values(%d, %s, %s, %s)"
-            %
-                (
-                    snapid,
-                    sqlite.format_sql_value(item["path"]),
-                    str(item["timestamp"]),
-                    sqlite.format_sql_value(contents_hash),
-                )
-          )
-    #end for
+    save_files(cu, snapid, basedir, to_save)
     cu.execute("end transaction")
     cu.close()
     db.close()
@@ -813,6 +826,74 @@ def cmd_save(args, opts) :
         "%d files saved in snapshot ID %d\n" % (len(to_save), snapid)
       )
 #end cmd_save
+
+def cmd_save_more(args, opts) :
+    dbname, snapid, basedir = args[0:3]
+    snapid = int(snapid)
+    basedir = os.path.abspath(basedir)
+    filespecs = args[3:]
+    db = open_db(dbname, DB_OPEN.READWRITE)
+    if has_filtering(db) :
+        raise getopt.GetoptError("filtering rules in effect, no explicit filespecs allowed")
+    #end if
+    if next(db_iter(db, "select id from snapshots where id = %d" % snapid), None) == None :
+        raise ValueError("no such snapshot with ID %d" % snapid)
+    #end if
+    to_save = get_filespecs_to_save(basedir, filespecs)
+    cu = db.cursor()
+    cu.execute("begin transaction")
+    save_files(cu, snapid, basedir, to_save)
+    cu.execute("end transaction")
+    cu.close()
+    db.close()
+#end cmd_save_more
+
+def cmd_unsave(args, opts) :
+    dbname, snapid = args[0:2]
+    snapid = int(snapid)
+    filespecs = args[2:]
+    rules = list((True, parse_wildcard("", f)) for f in filespecs)
+    db = open_db(dbname, DB_OPEN.READWRITE)
+    cu = db.cursor()
+    cu.execute("begin transaction")
+    to_delete = list \
+      (
+        f for f in
+        db_iter
+          (
+            db,
+            "select path from files where snapshot_id = %d" % snapid,
+            mapfn = lambda f : f[0]
+          )
+        if filter_says_include(f, rules)
+      )
+    blobs_deleted = 0
+    if len(to_delete) != 0 :
+        sys.stdout.write \
+          (
+            "delete files[%d]: %s\n" % (len(to_delete), ", ".join(repr(f) for f in to_delete))
+          )
+        cu.execute \
+          (
+                "delete from files where snapshot_id = %d and path in (%s)"
+            %
+                (
+                    snapid,
+                    ", ".join(sqlite.format_sql_value(f) for f in to_delete)
+                )
+          )
+        cu.execute("delete from file_blobs where sha256hash not in (select sha256hash from files)")
+        blobs_deleted = db_func(db, "changes")
+    else :
+        sys.stdout.write("delete files: none.\n")
+    #end if
+    cu.execute("end transaction")
+    if blobs_deleted != 0 :
+        cu.execute("vacuum")
+    #end if
+    cu.close()
+    db.close()
+#end cmd_unsave
 
 def cmd_restore(args, opts) :
     dbname, snapid, destdir = args
@@ -978,6 +1059,24 @@ recognized_commands = \
                 "help_descr" :
                     "saves a snapshot of files from «base_dir» into «dbname»"
                     " according to its currently loaded filter rules or the specified filespecs",
+            },
+
+        "save-more" :
+            {
+                "args" : (4, math.inf),
+                "opts" : (),
+                "action" : cmd_save_more,
+                "help_usage" : "«dbname» «snapid» «base_dir» «file» [«file»...]",
+                "help_descr" : "adds more files matching the given filespecs to a snapshot",
+            },
+
+        "unsave" :
+            {
+                "args" : (3, math.inf),
+                "opts" : (),
+                "action" : cmd_unsave,
+                "help_usage" : "«dbname» «snapid» «filespec» [«filespec»...]",
+                "help_descr" : "removes saved files matching the given filespecs from a snapshot",
             },
 
         "restore" :
