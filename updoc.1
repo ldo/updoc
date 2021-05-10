@@ -218,6 +218,11 @@ takes effect. If no rule applies to a file, it is omitted.
 When reading filter definitions from a file, lines beginning with “\#” are ignored
 and can be used for comments. No filter entries are made in the database for such lines.
 
+.SH BUGS
+
+File contents are loaded in their entirety into memory for saving and restoring. This
+probably makes the program unsuitable for dealing with very large files.
+
 .SH EXAMPLES
 
 .SS EXAMPLE FILTER RULES
