@@ -318,7 +318,43 @@ for inclusion.
 
 .SS EXAMPLE COMMAND USAGE
 
-TBD
+.PP
+.B updoc init test.vers
+
+Initializes a snapshot database that uses filter rules named
+.BR test.vers .
+
+.PP
+.B updoc setfilters test.vers filters.txt
+
+Sets filter rules into the
+.B test.vers
+database from the file
+.BR filters.txt .
+
+.PP
+.B updoc save test.vers workdir
+
+Saves files from the directory
+.B workdir
+that match filter rules previously set into the database
+.B test.vers
+as a new snapshot in that database.
+
+.PP
+.B updoc list -l test.vers
+
+Gives a long listing of all snapshots saved in the database
+.BR test.vers .
+
+.PP
+.B updoc restore -o test.vers 1 restoredir
+
+Does a restore of the snapshot with ID 1 from
+.B test.vers
+into the destination directory
+.BR restoredir ,
+overwriting any existing files with the same names.
 
 .SH ENVIRONMENT
 
