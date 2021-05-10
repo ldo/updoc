@@ -1,0 +1,15 @@
+What’s Updoc?
+=============
+
+**Updoc** is a tool for managing snapshots of collections of files.
+Files may be saved into a snapshot and restored from a snapshot. Snapshots
+are saved in an SQLite database. Selection of files may be done by
+attaching filter rules to the database, or by explicitly specifying file
+names on the command line. The base directory for save/restore operations
+is specified as part of the command; thus a snapshot may be saved from
+one directory and restored to a different directory.
+
+See the enclosed updoc(1) man page for more details.
+
+Lawrence D'Oliveiro <ldo@geek-central.gen.nz>
+2021 May 10
