@@ -19,6 +19,7 @@ import time
 import subprocess
 import tempfile
 import fnmatch
+import shutil
 import getopt
 import apsw as sqlite
 
@@ -474,6 +475,51 @@ def filter_says_include(pathspec, rules) :
     return includeit
 #end filter_says_include
 
+class EXIST_ACTION(enum.Enum) :
+    "how to handle creation of a file if one already exists with that name."
+    ERROR = ("error",)
+    SKIP = ("skip",)
+    REPLACE = ("replace",)
+    REPLACE_ALL = ("replace-all",)
+
+    @property
+    def keyword(self) :
+        return self.value[0]
+    #end keyword
+
+#end EXIST_ACTION
+EXIST_ACTION.from_keyword = dict((i.keyword, i) for i in EXIST_ACTION)
+
+def parse_exist_action(k, allow_replace_all) :
+    if k != None :
+        action = EXIST_ACTION.from_keyword.get(k)
+        if action == EXIST_ACTION.REPLACE_ALL and not allow_replace_all :
+            action = None
+        #end if
+        if action == None :
+            raise getopt.GetoptError \
+              (
+                    "unrecognized --existing action %s -- must be one of %s"
+                %
+                    (
+                        k,
+                        ", ".join
+                          (
+                            sorted
+                              (
+                                k for k in EXIST_ACTION.from_keyword
+                                if allow_replace_all or k != EXIST_ACTION.REPLACE_ALL.keyword
+                              )
+                          )
+                    )
+              )
+        #end if
+    else :
+        action = EXIST_ACTION.ERROR
+    #end if
+    return action
+#end parse_exist_action
+
 def get_filespecs_to_save(basedir, filespecs) :
     if len(filespecs) == 0 :
         raise getopt.GetoptError \
@@ -502,7 +548,7 @@ def get_filespecs_to_save(basedir, filespecs) :
     return to_save
 #end get_filespecs_to_save
 
-def save_files(cu, snapid, basedir, to_save, doit) :
+def save_files(cu, snapid, basedir, to_save, exist_action, doit) :
     for item in to_save :
         sys.stdout.write("%ssave %s\n" % (("would ", "")[doit], item["path"]))
         if doit :
@@ -519,15 +565,21 @@ def save_files(cu, snapid, basedir, to_save, doit) :
               )
             cu.execute \
               (
-                    "insert into files(snapshot_id, path, timestamp, sha256hash)"
-                    " values(%d, %s, %s, %s)"
+                    "insert or %(exist_action)s into files(snapshot_id, path, timestamp, sha256hash)"
+                    " values(%(snapid)d, %(path)s, %(timestamp)s, %(hash)s)"
                 %
-                    (
-                        snapid,
-                        sqlite.format_sql_value(item["path"]),
-                        str(item["timestamp"]),
-                        sqlite.format_sql_value(contents_hash),
-                    )
+                    {
+                        "exist_action" :
+                            {
+                                EXIST_ACTION.ERROR : "abort",
+                                EXIST_ACTION.SKIP : "ignore",
+                                EXIST_ACTION.REPLACE : "replace",
+                            }[exist_action],
+                        "snapid" : snapid,
+                        "path" : sqlite.format_sql_value(item["path"]),
+                        "timestamp" : str(item["timestamp"]),
+                        "hash" : sqlite.format_sql_value(contents_hash),
+                    }
               )
         #end if
     #end for
@@ -828,7 +880,7 @@ def cmd_save(args, opts) :
     else :
         snapid = None
     #end if
-    save_files(cu, snapid, basedir, to_save, doit)
+    save_files(cu, snapid, basedir, to_save, EXIST_ACTION.ERROR, doit)
     cu.execute("end transaction")
     cu.close()
     db.close()
@@ -850,6 +902,7 @@ def cmd_save_more(args, opts) :
     snapid = int(snapid)
     basedir = os.path.abspath(basedir)
     filespecs = args[3:]
+    exist_action = parse_exist_action(opts.get("existing"), False)
     doit = "dry-run" not in opts
     db = open_db(dbname, DB_OPEN.READWRITE)
     if has_filtering(db) :
@@ -861,7 +914,7 @@ def cmd_save_more(args, opts) :
     to_save = get_filespecs_to_save(basedir, filespecs)
     cu = db.cursor()
     cu.execute("begin transaction")
-    save_files(cu, snapid, basedir, to_save, doit)
+    save_files(cu, snapid, basedir, to_save, exist_action, doit)
     cu.execute("end transaction")
     cu.close()
     db.close()
@@ -923,7 +976,7 @@ def cmd_restore(args, opts) :
     dbname, snapid, destdir = args
     snapid = int(snapid)
     preserve_timestamps = "preserve-timestamps" in opts
-    overwrite = "overwrite" in opts
+    exist_action = parse_exist_action(opts.get("existing"), True)
     doit = "dry-run" not in opts
     db = open_db(dbname, DB_OPEN.READONLY)
     if not stat.S_ISDIR(os.lstat(destdir).st_mode) :
@@ -931,6 +984,13 @@ def cmd_restore(args, opts) :
     #end if
     if next(db_iter(db, "select id from snapshots where id = %d" % snapid), None) == None :
         raise ValueError("no such snapshot with ID %d" % snapid)
+    #end if
+    if exist_action == EXIST_ACTION.REPLACE_ALL :
+        temp_destdir = destdir + "-new"
+        os.mkdir(temp_destdir)
+        use_destdir = temp_destdir
+    else :
+        use_destdir = destdir
     #end if
     nr_restored = 0
     for childname, timestamp, contents in db_iter \
@@ -945,22 +1005,36 @@ def cmd_restore(args, opts) :
     :
         assert contents != None
         sys.stdout.write("%srestore %s\n" % (("would ", "")[doit], childname))
-        childpath = os.path.join(destdir, childname)
-        if not overwrite and os.path.exists(childpath) :
-            raise FileExistsError("dest file “%s” already exists in %s" % (childname, destdir))
-        #end if
-        if doit :
-            os.makedirs(os.path.split(childpath)[0], exist_ok = True)
-            childfile = open(childpath, "wb")
-            childfile.write(contents)
-            childfile.close()
-            if preserve_timestamps :
-                os.utime(childpath, (timestamp, timestamp))
+        childpath = os.path.join(use_destdir, childname)
+        already_exists = os.path.exists(childpath)
+        if already_exists and exist_action not in (EXIST_ACTION.REPLACE, EXIST_ACTION.REPLACE_ALL) :
+            if exist_action != EXIST_ACTION.SKIP :
+                raise FileExistsError \
+                  (
+                    "dest file “%s” already exists in %s" % (childname, destdir)
+                  )
+            #end if
+        else :
+            if doit :
+                if already_exists :
+                    os.unlink(childpath)
+                #end if
+                os.makedirs(os.path.split(childpath)[0], exist_ok = True)
+                childfile = open(childpath, "wb")
+                childfile.write(contents)
+                childfile.close()
+                if preserve_timestamps :
+                    os.utime(childpath, (timestamp, timestamp))
+                #end if
             #end if
         #end if
         nr_restored += 1
     #end for
     db.close()
+    if exist_action == EXIST_ACTION.REPLACE_ALL :
+        shutil.rmtree(destdir)
+        os.rename(temp_destdir, destdir)
+    #end if
     sys.stdout.write("%d files %srestored.\n" % (nr_restored, ("would have been ", "")[doit]))
 #end cmd_restore
 
@@ -1169,9 +1243,10 @@ recognized_commands = \
         "save-more" :
             {
                 "args" : (4, math.inf),
-                "opts" : ("dry-run",),
+                "opts" : ("dry-run", "existing="),
                 "action" : cmd_save_more,
-                "help_usage" : "«dbname» «snapid» «base_dir» «file» [«file»...]",
+                "help_usage" : "[--existing=skip|replace] «dbname» «snapid» «base_dir»"
+                    " «file» [«file»...]",
                 "help_descr" : "adds more files matching the given filespecs to a snapshot",
             },
 
@@ -1187,10 +1262,11 @@ recognized_commands = \
         "restore" :
             {
                 "args" : 3,
-                "opts" : ("dry-run", "overwrite/o", "preserve-timestamps/p",),
+                "opts" : ("dry-run", "existing=", "preserve-timestamps/p",),
                 "action" : cmd_restore,
                 "help_usage" :
-                    "[--overwrite|-o] [--preserve-timestamps|-p] «dbname» «snapid» «dest_dir»",
+                    "[--existing=skip|replace|replace-all] [--preserve-timestamps|-p]"
+                        " «dbname» «snapid» «dest_dir»",
                 "help_descr" : "restores a previously-saved snapshot into a specified directory",
             },
 

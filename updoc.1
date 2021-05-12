@@ -89,9 +89,9 @@ must be contained within
 .BR «basedir» ).
 
 .TP
-.B save-more [\-\-dry\-run] «dbname» «snapid» «basedir» «filespec» ...
-adds more files to an existing snapshot. The given snapshot database must not
-have filtering in effect.
+.B save-more [\-\-dry\-run] [\-\-existing=«exist\-action»] «dbname» «snapid» «basedir» «filespec» ...
+adds more files to an existing snapshot, or replaces existing files in the snapshot.
+The given snapshot database must not have filtering in effect.
 
 .TP
 .B unsave [\-\-dry\-run] «dbname» «snapid» «filespec» ...
@@ -114,7 +114,7 @@ assigned snapshot ID, when they were taken and any descriptive message. Specifyi
 includes details about each file that is part of a snapshot.
 
 .TP
-.B restore [\-\-dry\-run] [\-\-overwrite|\-o] [\-\-preserve-timestamps|\-p] «dbname» «snapid» «basedir»
+.B restore [\-\-dry\-run] [\-\-existing=«exist\-action»] [\-\-preserve-timestamps|\-p] «dbname» «snapid» «basedir»
 restores the previously-saved snapshot from the database with id
 .B «snapid»
 into destination directory
@@ -152,17 +152,42 @@ without actually doing it; no changes to the database or the
 filesystem are made.
 
 .TP
-.B \-\-overwrite|\-o
-.RB ( \-\-overwrite ,
-may be abbreviated to
-.BR \-o )
+.B \-\-existing=«exist\-action»
 specifies what to do if a file being restored matches the name of one that
-already exists; if this is specified, the existing file is overwritten, otherwise
-an error is raised.
+already exists. Valid values of
+.B «exist\-action»
+are
+.br
+*
+.B error
+\-\- Report an error and abort the operation. The default if no
+.B «exist\-action»
+is specified.
+.br
+*
+.B skip
+\-\- Skip this file.
+.br
+*
+.B replace
+\-\- Replace the existing file with the new one.
+.br
+*
+.B replace-all
+\-\- (for the
+.B restore
+command only) do the entire restoration into a temporary directory named
+.BR «basedir» -new,
+and when this is complete, the existing
+.B «basedir»
+and its contents are deleted and
+.BR «basedir» -new
+is renamed to
+.BR «basedir».
 
 .TP
 .B \-\-verbose|\-v
-.RB ( \-\-verbose ,
+.RB ( \-\-verbose
 may be abbreviated to
 .BR \-v )
 specifies whether to report details on what is being done; if omitted, the
@@ -250,8 +275,11 @@ and can be used for comments. No filter entries are made in the database for suc
 All database updates are done within transactions. That means, for example, if any
 error occurs within a save operation, then the database should not have any partial
 save remaining within it. However, the restore operation could end up leaving a
-partial restore if, for example, a file already existed and the \-\-overwrite option
-was not specified.
+partial restore if, for example, a file already existed and one of the
+.B \-\-existing=replace
+or
+.B \-\-existing=skip
+options was not specified.
 
 .SS WHY NOT VERSION CONTROL?
 
@@ -316,7 +344,7 @@ Includes all files ending with
 at the top level of the base directory.
 
 .PP
-.B recursive-include src *.c *.py
+.B recursive\-include src *.c *.py
 .br
 
 Includes all files ending with
@@ -346,7 +374,7 @@ Includes all files within the
 subdirectory down to all levels.
 
 .PP
-.B prune build-temp
+.B prune build\-temp
 
 Excludes all files in the
 .B build-temp
@@ -355,9 +383,9 @@ subdirectory down to all levels. (Perhaps it contains temporarily-generated
 files which are to be excluded from the snapshot.)
 
 .PP
-.B global-include *.py
+.B global\-include *.py
 .br
-.B global-exclude _*.py
+.B global\-exclude _*.py
 .br
 .B include __init__.py
 
@@ -400,13 +428,13 @@ that match filter rules previously set into the database
 as a new snapshot in that database.
 
 .PP
-.B updoc list -l test.vers
+.B updoc list \-l test.vers
 
 Gives a long listing of all snapshots saved in the database
 .BR test.vers .
 
 .PP
-.B updoc restore -o test.vers 1 restoredir
+.B updoc restore \-\-existing=replace test.vers 1 restoredir
 
 Does a restore of the snapshot with ID 1 from
 .B test.vers
