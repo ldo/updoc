@@ -23,9 +23,9 @@ a snapshot to be saved from one directory and restored to a different directory.
 Note that snapshots do not contain directories as such, only files in those
 directories.
 
-.SH OPTIONS
+.SH SUBCOMMANDS
 
-The options depend on the particular command, as follows:
+The available commands are:
 
 .TP
 .B help [«cmd»]
@@ -135,13 +135,7 @@ as well; if not, it simply gets the current date/time.
 .TP
 .B delete [\-\-verbose|-v] «dbname» «snapid»
 deletes the previously-saved snapshot with the given ID from the snapshot
-database. The
-.B \-\-verbose
-option (which may be abbreviated to
-.BR -v )
-specifies whether to report on what is being done (including the possibility
-that nothing was done because no snapshot was found with that ID); otherwise,
-the operation proceeds quietly.
+database. Does nothing if such a snapshot does not exist.
 
 .TP
 .B copy [\-\-verbose|-v] «db1name» «snapids» «db2name»
@@ -151,11 +145,18 @@ is a comma-separated list of the snapshot IDs in database
 .B «db1name»
 to be copied to
 .BR «db2name» .
-The
-.B \-\-verbose
-option (which may be abbreviated to
-.BR -v )
-specifies whether to report on what is being done; otherwise, the operation proceeds quietly.
+
+.SS COMMON OPTIONS
+
+Some options are common across more than one command. These are:
+
+.TP
+.B \-\-verbose|\-v
+.RB ( \-\-verbose ,
+may be abbreviated to
+.BR \-v )
+specifies whether to report details on what is being done; if omitted, the
+operation proceeds quietly.
 
 .SH FILTER SYNTAX
 
