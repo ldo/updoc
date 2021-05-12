@@ -70,7 +70,7 @@ Reports an error if the database does not use filtering.
 .TP
 .B save [\-\-message=«message»] «dbname» «basedir»
 .TP
-.B save [\-\-message=«message»] «dbname» «basedir» «filespec» ...
+.B save [\-\-dry\-run] [\-\-message=«message»] «dbname» «basedir» «filespec» ...
 saves a snapshot into the specified database
 .BR «dbname» ,
 taking the files from
@@ -89,12 +89,12 @@ must be contained within
 .BR «basedir» ).
 
 .TP
-.B save-more «dbname» «snapid» «basedir» «filespec» ...
+.B save-more [\-\-dry\-run] «dbname» «snapid» «basedir» «filespec» ...
 adds more files to an existing snapshot. The given snapshot database must not
 have filtering in effect.
 
 .TP
-.B unsave «dbname» «snapid» «filespec» ...
+.B unsave [\-\-dry\-run] «dbname» «snapid» «filespec» ...
 removes files matching the given
 .BR «filespec» s
 from the specified snapshot. The
@@ -114,7 +114,7 @@ assigned snapshot ID, when they were taken and any descriptive message. Specifyi
 includes details about each file that is part of a snapshot.
 
 .TP
-.B restore [\-\-overwrite|\-o] [\-\-preserve-timestamps|\-p] «dbname» «snapid» «basedir»
+.B restore [\-\-dry\-run] [\-\-overwrite|\-o] [\-\-preserve-timestamps|\-p] «dbname» «snapid» «basedir»
 restores the previously-saved snapshot from the database with id
 .B «snapid»
 into destination directory
@@ -149,6 +149,12 @@ to be copied to
 .SS COMMON OPTIONS
 
 Some options are common across more than one command. These are:
+
+.TP
+.B \-\-dry\-run
+indicates that the operation is only to report what it would do,
+without actually doing it; no changes to the database or the
+filesystem are made.
 
 .TP
 .B \-\-verbose|\-v
