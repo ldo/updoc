@@ -119,13 +119,8 @@ restores the previously-saved snapshot from the database with id
 .B «snapid»
 into destination directory
 .BR «basedir» .
-Any necessary subdirectories will be created if any files go into them. The
-.B \-\-overwrite
-option (which may be abbreviated to
-.BR -o )
-specifies what to do if a file being restored matches the name of one that
-already exists; if this is specified, the existing file is overwritten, otherwise
-an error is raised. The
+Any necessary subdirectories will be created if any files go into them.
+The
 .B \-\-preserve-timestamps
 option (which may be abbreviated to
 .BR -p )
@@ -155,6 +150,15 @@ Some options are common across more than one command. These are:
 indicates that the operation is only to report what it would do,
 without actually doing it; no changes to the database or the
 filesystem are made.
+
+.TP
+.B \-\-overwrite|\-o
+.RB ( \-\-overwrite ,
+may be abbreviated to
+.BR \-o )
+specifies what to do if a file being restored matches the name of one that
+already exists; if this is specified, the existing file is overwritten, otherwise
+an error is raised.
 
 .TP
 .B \-\-verbose|\-v
