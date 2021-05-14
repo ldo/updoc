@@ -60,6 +60,27 @@ def db_func(conn, funcname) :
     return result
 #end db_func
 
+def db_has_table(conn, table_name) :
+    "does the SQLite table include a table with the given name."
+    return \
+        (
+            next
+              (
+                db_iter
+                  (
+                    conn,
+                        "select tbl_name from sqlite_schema where type = \"table\""
+                        " and tbl_name = %s"
+                    %
+                        sqlite.format_sql_value(table_name)
+                  ),
+                None
+              )
+        !=
+            None
+        )
+#end db_has_table
+
 class DIRKIND(enum.Enum) :
     "how to interpret file/dir specs in filter rules."
     ROOT = 0 # interpret as spec relative to root dir
@@ -166,39 +187,24 @@ def open_db(dbname, mode, using_filters = True) :
                 |
                     (0, sqlite.SQLITE_OPEN_CREATE)[mode == DB_OPEN.READWRITECREATE]
           )
-    cu = result.cursor()
-    try :
-        cu.execute("select count(*) from %s where %s is not null" % (test_table, test_field))
-        inited = True
-    except sqlite.SQLError :
+    if not db_has_table(result, "snapshots") :
         if mode < DB_OPEN.READWRITECREATE :
-            raise
+            raise RuntimeError("File “%s” does not look like a snapshots database" % dbname)
         #end if
-        # assume it’s a newly-created database, need to set up the tables
-        inited = False
-    #end try
-    if not inited :
         sys.stderr.write("Initializing new database\n") # debug
+        cu = result.cursor()
         for create_table in create_tables + ([], create_filter_tables)[using_filters] :
             cu.execute(create_table)
         #end for
+        cu.close()
     #end if
-    cu.close()
     return \
         result
 #end open_db_common
 
 def has_filtering(db) :
     "does this database use filtering rules."
-    try :
-        db.cursor().execute("select count(*) from filter_rules")
-    except sqlite.SQLError :
-        filtering = False
-    else :
-        filtering = True
-    #end try
-    return \
-        filtering
+    return db_has_table(db, "filter_rules")
 #end has_filtering
 
 def parse_wildcard(parent, child) :
