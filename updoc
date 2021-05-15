@@ -60,26 +60,16 @@ def db_func(conn, funcname) :
     return result
 #end db_func
 
-def db_has_table(conn, table_name) :
-    "does the SQLite table include a table with the given name."
+def db_tables(conn) :
+    "returns the set of table names in the given SQLite database."
     return \
-        (
-            next
-              (
-                db_iter
-                  (
-                    conn,
-                        "select tbl_name from sqlite_schema where type = \"table\""
-                        " and tbl_name = %s"
-                    %
-                        sqlite.format_sql_value(table_name)
-                  ),
-                None
-              )
-        !=
-            None
-        )
-#end db_has_table
+        set(db_iter
+          (
+            conn,
+            "select tbl_name from sqlite_schema where type = \"table\"",
+            mapfn = lambda f : f[0]
+          ))
+#end db_tables
 
 class DIRKIND(enum.Enum) :
     "how to interpret file/dir specs in filter rules."
@@ -135,48 +125,47 @@ class RULE_ACTION(enum.Enum) :
 #end RULE_ACTION
 RULE_ACTION.from_keyword = dict((i.keyword, i) for i in RULE_ACTION)
 
+snapshot_tables = \
+    {
+        "snapshots" :
+            [
+                "id integer primary key autoincrement",
+                "comment varchar not null",
+                "timestamp double not null",
+            ],
+        "files" :
+            [
+                "snapshot_id integer not null", # = snapshots.id
+                "path varchar not null",
+                "timestamp double not null",
+                "sha256hash varchar not null", # = file_blobs.sha256hash
+                "primary key (snapshot_id, path)",
+            ],
+        "file_blobs" : # contents of files separated out to allow deduping
+            [
+                "contents blob not null",
+                "sha256hash varchar primary key not null", # hex hash of contents
+            ],
+    }
+snapshot_filter_tables = \
+    {
+        "filter_rules" :
+            [
+                "ordering integer primary key not null", # for ordering of rules
+                "action varchar not null",
+            ],
+        "filter_items" :
+            [
+                "rule_ordering integer not null", # = filter_rules.filter_item
+                "item_ordering integer not null", # for ordering of items within rule
+                "pathspec varchar not null",
+                "primary key(rule_ordering, item_ordering)",
+            ],
+    }
+
 def open_db(dbname, mode, using_filters = True) :
     "opens the specified database file and returns a new connection. mode is DB_OPEN value."
-    test_table = "snapshots"
-    test_field = "id"
-    create_tables = \
-        [
-            "create table snapshots\n"
-            "  (\n"
-            "    id integer primary key autoincrement,\n"
-            "    comment varchar not null,\n"
-            "    timestamp double not null\n"
-            "  )\n",
-            "create table files\n"
-            "  (\n"
-            "    snapshot_id integer not null,\n" # = snapshots.id
-            "    path varchar not null,\n"
-            "    timestamp double not null,\n"
-            "    sha256hash varchar not null,\n" # = file_blobs.sha256hash
-            "    primary key (snapshot_id, path)\n"
-            "  )\n",
-            "create table file_blobs\n"
-              # contents of files separated out to allow deduping
-            "  (\n"
-            "    contents blob not null,\n"
-            "    sha256hash varchar primary key not null\n" # hex hash of contents
-            "  )\n",
-        ]
-    create_filter_tables = \
-        [
-            "create table filter_rules\n"
-            "  (\n"
-            "    ordering integer primary key not null,\n" # for ordering of rules
-            "    action varchar not null\n"
-            "  )\n",
-            "create table filter_items\n"
-            "  (\n"
-            "    rule_ordering integer not null,\n" # = filter_rules.filter_item
-            "    item_ordering integer not null,\n" # for ordering of items within rule
-            "    pathspec varchar not null,\n"
-            "    primary key(rule_ordering, item_ordering)\n"
-            "  )\n",
-        ]
+    create_tables = dict(snapshot_tables)
     result = \
         sqlite.Connection \
           (
@@ -187,14 +176,32 @@ def open_db(dbname, mode, using_filters = True) :
                 |
                     (0, sqlite.SQLITE_OPEN_CREATE)[mode == DB_OPEN.READWRITECREATE]
           )
-    if not db_has_table(result, "snapshots") :
-        if mode < DB_OPEN.READWRITECREATE :
-            raise RuntimeError("File “%s” does not look like a snapshots database" % dbname)
-        #end if
+    to_create = set(create_tables.keys())
+    existing_tables = set(db_tables(result)) & to_create
+    if existing_tables != to_create and (len(existing_tables) != 0 or mode < DB_OPEN.READWRITECREATE) :
+        raise RuntimeError("File “%s” does not look like a snapshots database" % dbname)
+    #end if
+    if len(existing_tables) == 0 :
         sys.stderr.write("Initializing new database\n") # debug
+        if using_filters :
+            create_tables.update(snapshot_filter_tables)
+        #end if
         cu = result.cursor()
-        for create_table in create_tables + ([], create_filter_tables)[using_filters] :
-            cu.execute(create_table)
+        for table_name, fields in create_tables.items() :
+            cmd = \
+                (
+                        "create table %(table)s\n"
+                        "  (\n"
+                        "%(fields)s\n"
+                        "  )"
+                    %
+                        {
+                            "table" : table_name,
+                            "fields" : ",\n".join("    " + field for field in fields),
+                        }
+                )
+            sys.stderr.write(cmd + "\n") # debug
+            cu.execute(cmd)
         #end for
         cu.close()
     #end if
@@ -204,7 +211,8 @@ def open_db(dbname, mode, using_filters = True) :
 
 def has_filtering(db) :
     "does this database use filtering rules."
-    return db_has_table(db, "filter_rules")
+    filter_tables = set(snapshot_filter_tables.keys())
+    return set(db_tables(db)) & filter_tables == filter_tables
 #end has_filtering
 
 def parse_wildcard(parent, child) :
