@@ -941,6 +941,26 @@ def cmd_save_more(args, opts) :
     db.close()
 #end cmd_save_more
 
+def cmd_setcomment(args, opts) :
+    dbname, snapid, comment = args
+    snapid = int(snapid)
+    db = open_db(dbname, DB_OPEN.READWRITE)
+    db.cursor().execute \
+      (
+            "update snapshots set comment = %(comment)s where id = %(snapid)d"
+        %
+            {
+                "snapid" : snapid,
+                "comment" : sqlite.format_sql_value(comment)
+            }
+      )
+    snap_existed = db_func(db, "changes") != 0
+    db.close()
+    if not snap_existed :
+        raise ValueError("no such snapshot with ID %d" % snapid)
+    #end if
+#end cmd_setcomment
+
 def cmd_unsave(args, opts) :
     dbname, snapid = args[0:2]
     snapid = int(snapid)
@@ -1307,6 +1327,15 @@ recognized_commands = \
                 "help_usage" : "[--existing=skip|replace] «dbname» «snapid» «base_dir»"
                     " «file» [«file»...]",
                 "help_descr" : "adds more files matching the given filespecs to a snapshot",
+            },
+
+        "setcomment" :
+            {
+                "args" : 3,
+                "opts" : (),
+                "action" : cmd_setcomment,
+                "help_usage" : "«dbname» «snapid» «comment»",
+                "help_descr" : "changes the comment associated with a snapshot",
             },
 
         "unsave" :

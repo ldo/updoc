@@ -94,6 +94,10 @@ adds more files to an existing snapshot, or replaces existing files in the snaps
 The given snapshot database must not have filtering in effect.
 
 .TP
+.B setcomment «dbname» «snapid» «comment»
+changes the comment associated with a given snapshot.
+
+.TP
 .B unsave [\-\-dry\-run] «dbname» «snapid» «filespec» ...
 removes files matching the given
 .BR «filespec» s
