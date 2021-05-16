@@ -103,6 +103,22 @@ can contain wildcards to match multiple files; these will need to be escaped
 to prevent the shell expanding them.
 
 .TP
+.B rename «dbname» «snapid» «oldname› «newname»
+renames a saved file matching
+.B «oldname»
+in the snapshot to
+.BR «newname» .
+
+If
+.B «newname»
+ends with a slash, then the new name will consist of that
+with the part of
+.B «oldname»
+after the last slash (or the whole of
+.BR «oldname» ,
+if it contains no slashes) appended to that.
+
+.TP
 .B list [\-\-long|-l] «dbname»
 lists the snapshots previously saved to database
 .B «dbname» ,

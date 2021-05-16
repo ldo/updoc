@@ -993,6 +993,44 @@ def cmd_unsave(args, opts) :
     db.close()
 #end cmd_unsave
 
+def cmd_rename(args, opts) :
+    dbname, snapid, oldname, newname = args
+    snapid = int(snapid)
+    db = open_db(dbname, DB_OPEN.READWRITE)
+    if oldname.startswith("/") or newname.startswith("/") or oldname.endswith("/") :
+        raise getopt.GetoptError("bad pathnames: %s, %s\n" % (repr(oldname), repr(newname)))
+    #end if
+    oldname = os.path.normpath("/" + oldname)[1:]
+    isdir = newname.endswith("/")
+    newname = os.path.normpath("/" + newname)[1:]
+    if len(newname) != 0 and isdir :
+        newname += "/"
+    #end if
+    if newname.endswith("/") :
+        newname = \
+            (
+                newname
+            +
+                (lambda : oldname, lambda : oldname.rsplit("/", 1)[1])["/" in oldname]()
+            )
+    elif len(newname) == 0 :
+        newname = oldname.rsplit("/", 1)[1]
+    #end if
+    db.cursor().execute \
+      (
+            "update files set path = %(newname)s where snapshot_id = %(snapid)d and path = %(oldname)s"
+        %
+            {
+                "snapid" : snapid,
+                "oldname" : sqlite.format_sql_value(oldname),
+                "newname" : sqlite.format_sql_value(newname),
+            }
+      )
+    renamed = db_func(db, "changes")
+    db.close()
+    sys.stderr.write("files affected: %d\n" % renamed) # debug
+#end cmd_rename
+
 def cmd_restore(args, opts) :
     dbname, snapid, destdir = args
     snapid = int(snapid)
@@ -1278,6 +1316,15 @@ recognized_commands = \
                 "action" : cmd_unsave,
                 "help_usage" : "«dbname» «snapid» «filespec» [«filespec»...]",
                 "help_descr" : "removes saved files matching the given filespecs from a snapshot",
+            },
+
+        "rename" :
+            {
+                "args" : 4,
+                "opts" : (),
+                "action" : cmd_rename,
+                "help_usage" : "«dbname» «snapid» «oldfilespec» «newfilespec»",
+                "help_descr" : "renames a saved file in a snapshot",
             },
 
         "restore" :
