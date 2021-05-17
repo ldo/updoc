@@ -621,6 +621,57 @@ def gc_blobs(db, cu = None) :
     return blobs_deleted
 #end gc_blobs
 
+def get_editor(opts) :
+    "returns the user’s specification of text editor to use. Raises error" \
+    " if none can be found."
+    editor = opts.get("editor")
+    if editor == None :
+        editor = os.environ.get("EDITOR")
+    #end if
+    if editor == None :
+        raise getopt.GetoptError("no --editor or $EDITOR specified")
+    #end if
+    return editor
+#end get_editor
+
+class EditText :
+    "common code for managing a temporary file used to let the user" \
+    " interactively edit some text data. “category” is used to give" \
+    " a distinctive name to the temporary file."
+
+    def __init__(self, opts, category) :
+        self.editor = get_editor(opts)
+        self.tempfd, self.tempfilename = \
+            tempfile.mkstemp(prefix = "updoc-", suffix = "-" + category)
+    #end __init__
+
+    def edit(self, text) :
+        "brings up the editor to let the user edit the given text." \
+        " Returns process exist status and the new text or None."
+        os.ftruncate(self.tempfd, 0)
+        os.write(self.tempfd, text.encode())
+        status = subprocess.call \
+          (
+            args = (self.editor, self.tempfilename),
+          )
+        if status == 0 :
+            new_text_len = os.lseek(self.tempfd, 0, os.SEEK_END)
+            os.lseek(self.tempfd, 0, os.SEEK_SET)
+            new_text = os.read(self.tempfd, new_text_len).decode()
+        else :
+            new_text = None
+        #end if
+        return status, new_text
+    #end edit
+
+    def cleanup(self) :
+        os.unlink(self.tempfilename)
+        os.close(self.tempfd)
+        self.tempfilename = self.tempfd = None
+    #end cleanup
+
+#end EditText
+
 #+
 # Definitions of valid commands.
 #
@@ -718,38 +769,26 @@ def cmd_showfilters(args, opts) :
 
 def cmd_editfilters(args, opts) :
     dbname, = args
-    editor = opts.get("editor")
-    if editor == None :
-        editor = os.environ.get("EDITOR")
-    #end if
-    if editor == None :
-        raise getopt.GetoptError("no --editor or $EDITOR specified")
-    #end if
     db = open_db(dbname, DB_OPEN.READWRITE)
     if not has_filtering(db) :
         raise getopt.GetoptError("database %s does not use filters" % dbname)
     #end if
-    tempfiltersfd, tempfiltersname = tempfile.mkstemp(prefix = "updoc-", suffix = "-filters")
-    os.ftruncate(tempfiltersfd, 0)
-    os.write \
+    editing = EditText(opts, "filters")
+    status, new_rules = editing.edit \
       (
-        tempfiltersfd,
-        b"".join
+        "".join
           (
-            (" ".join([action] + items) + "\n").encode()
+            " ".join([action] + items) + "\n"
             for action, items in load_filters(db)
           )
       )
-    status = subprocess.call \
-      (
-        args = (editor, tempfiltersname),
-      )
     if status != 0 :
-        sys.stdout.write("editor %s terminated with status %d -- edit aborted\n" % (editor, status))
+        sys.stdout.write \
+          (
+            "editor %s terminated with status %d -- edit aborted\n" % (editing.editor, status)
+          )
     else :
-        new_rules_len = os.lseek(tempfiltersfd, 0, os.SEEK_END)
-        os.lseek(tempfiltersfd, 0, os.SEEK_SET)
-        filters, had_comments = parse_manifest(os.read(tempfiltersfd, new_rules_len).decode())
+        filters, had_comments = parse_manifest(new_rules)
         if len(filters) != 0 or had_comments :
             set_filters(db, filters)
             if len(filters) != 0 :
@@ -762,8 +801,7 @@ def cmd_editfilters(args, opts) :
         #end if
     #end if
     db.close()
-    os.unlink(tempfiltersname)
-    os.close(tempfiltersfd)
+    editing.cleanup()
 #end cmd_editfilters
 
 def cmd_list(args, opts) :
@@ -977,6 +1015,45 @@ def cmd_setcomment(args, opts) :
         raise ValueError("no such snapshot with ID %d" % snapid)
     #end if
 #end cmd_setcomment
+
+def cmd_editcomment(args, opts) :
+    dbname, snapid = args
+    snapid = int(snapid)
+    db = open_db(dbname, DB_OPEN.READWRITE)
+    editing = EditText(opts, "comment")
+    comment = next \
+      (
+        db_iter
+          (
+            db,
+            "select comment from snapshots where id = %d" % snapid,
+            mapfn = single_field
+          ),
+        None
+      )
+    if comment == None :
+        raise ValueError("no such snapshot with ID %d" % snapid)
+    #end if
+    status, comment = editing.edit(comment)
+    if status != 0 :
+        sys.stdout.write \
+          (
+            "editor %s terminated with status %d -- edit aborted\n" % (editing.editor, status)
+          )
+    else :
+        db.cursor().execute \
+          (
+                "update snapshots set comment = %(comment)s where id = %(snapid)d"
+            %
+                {
+                    "snapid" : snapid,
+                    "comment" : sqlite.format_sql_value(comment)
+                }
+          )
+    #end if
+    db.close()
+    editing.cleanup()
+#end cmd_editcomment
 
 def cmd_unsave(args, opts) :
     dbname, snapid = args[0:2]
@@ -1349,6 +1426,16 @@ recognized_commands = \
                 "action" : cmd_setcomment,
                 "help_usage" : "«dbname» «snapid» «comment»",
                 "help_descr" : "changes the comment associated with a snapshot",
+            },
+
+        "editcomment" :
+            {
+                "args" : 2,
+                "opts" : ("editor=",),
+                "action" : cmd_editcomment,
+                "help_usage" : "[--editor=«editor»] «dbname» «snapid»",
+                "help_descr" :
+                    "lets you interactively edit the comment associated with a snapshot",
             },
 
         "unsave" :
