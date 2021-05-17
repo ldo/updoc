@@ -606,6 +606,19 @@ def save_files(cu, snapid, basedir, to_save, exist_action, doit) :
     #end for
 #end save_files
 
+def gc_blobs(db, cu = None) :
+    "deletes unreferenced file_blob entries."
+    if cu == None :
+        cu = db.cursor()
+    #end if
+    cu.execute("delete from file_blobs where sha256hash not in (select sha256hash from files)")
+    blobs_deleted = db_func(db, "changes")
+    if blobs_deleted != 0 :
+        cu.execute("vacuum")
+    #end if
+    return blobs_deleted
+#end gc_blobs
+
 #+
 # Definitions of valid commands.
 #
@@ -996,17 +1009,15 @@ def cmd_unsave(args, opts) :
                         ", ".join(sqlite.format_sql_value(f) for f in to_delete)
                     )
               )
-            cu.execute("delete from file_blobs where sha256hash not in (select sha256hash from files)")
-            blobs_deleted = db_func(db, "changes")
         #end if
     else :
         sys.stdout.write("delete files: none.\n")
     #end if
     cu.execute("end transaction")
-    if blobs_deleted != 0 :
-        cu.execute("vacuum")
-    #end if
     cu.close()
+    if doit :
+        gc_blobs(db)
+    #end if
     db.close()
 #end cmd_unsave
 
@@ -1139,10 +1150,8 @@ def cmd_delete(args, opts) :
                     }
               )
         #end for
-        cu.execute("delete from file_blobs where sha256hash not in (select sha256hash from files)")
-        blobs_deleted = db_func(db, "changes")
         cu.execute("end transaction")
-        cu.execute("vacuum")
+        blobs_deleted = gc_blobs(db, cu)
         cu.close()
         if verbose :
             sys.stdout.write \
