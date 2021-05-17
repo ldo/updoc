@@ -799,6 +799,11 @@ def cmd_list(args, opts) :
                 #end if
                 first = False
                 sys.stdout.write("* snap ID %d at %s\n" % (snap_id, format_timestamp(snap_timestamp)))
+                if len(comment) != 0 :
+                    sys.stdout.write("  ")
+                    sys.stdout.write(comment)
+                    sys.stdout.write("\n")
+                #end if
                 last_snap_id = snap_id
                 nr_files = total_size = 0
             #end if
