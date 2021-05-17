@@ -167,8 +167,7 @@ def open_db(dbname, mode, using_filters = True) :
     "opens the specified database file and returns a new connection. mode is DB_OPEN value."
     if mode == DB_OPEN.READWRITECREATE :
         fd = os.open(dbname, flags = os.O_RDWR | os.O_CREAT | os.O_EXCL)
-          # not foolproof to guarantee exclusive open, as someone could move it
-          # between this and following open
+          # try to guarantee not overwriting existing file when creating database
     else :
         fd = None
     #end if
@@ -177,10 +176,8 @@ def open_db(dbname, mode, using_filters = True) :
           (
             dbname,
             flags =
-                    (sqlite.SQLITE_OPEN_READONLY, sqlite.SQLITE_OPEN_READWRITE)
-                        [mode >= DB_OPEN.READWRITE]
-                |
-                    (0, sqlite.SQLITE_OPEN_CREATE)[mode == DB_OPEN.READWRITECREATE]
+                (sqlite.SQLITE_OPEN_READONLY, sqlite.SQLITE_OPEN_READWRITE)
+                    [mode >= DB_OPEN.READWRITE]
           )
     if fd != None :
         os.close(fd)
