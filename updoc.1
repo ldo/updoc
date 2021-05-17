@@ -1,4 +1,4 @@
-.TH "UPDOC" "1" "2021-05-10" "Geek Central" "A Miscellany Of Useful Commands"
+.TH "UPDOC" "1" "2021-05-17" "Geek Central" "A Miscellany Of Useful Commands"
 
 .SH NAME
 updoc \- manage versioned snapshots of collections of files
@@ -96,6 +96,10 @@ The given snapshot database must not have filtering in effect.
 .TP
 .B setcomment «dbname» «snapid» «comment»
 changes the comment associated with a given snapshot.
+
+.TP
+.B editcomment [\-\-editor=«editor»] «dbname» «snapid»
+lets you interactively edit the comment associated with a given snapshot.
 
 .TP
 .B unsave [\-\-dry\-run] «dbname» «snapid» «filespec» ...
