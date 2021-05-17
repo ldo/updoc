@@ -49,13 +49,15 @@ def db_iter(conn, cmd, mapfn = lambda x : x) :
     #end for
 #end db_iter
 
+single_field = lambda x : x[0]
+
 def db_func(conn, funcname) :
     "executes the named function in a select statement and returns its value."
     result, = list(db_iter
       (
         conn,
         "select %s()" % funcname,
-        mapfn = lambda x : x[0]
+        mapfn = single_field
       ))
     return result
 #end db_func
@@ -67,7 +69,7 @@ def db_tables(conn) :
           (
             conn,
             "select tbl_name from sqlite_schema where type = \"table\"",
-            mapfn = lambda f : f[0]
+            mapfn = single_field
           ))
 #end db_tables
 
@@ -992,7 +994,7 @@ def cmd_unsave(args, opts) :
           (
             db,
             "select path from files where snapshot_id = %d" % snapid,
-            mapfn = lambda f : f[0]
+            mapfn = single_field
           )
         if filter_says_include(f, rules)
       )
