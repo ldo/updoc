@@ -1,4 +1,4 @@
-.TH "UPDOC" "1" "2021-05-17" "Geek Central" "A Miscellany Of Useful Commands"
+.TH "UPDOC" "1" "2021-05-19" "Geek Central" "A Miscellany Of Useful Commands"
 
 .SH NAME
 updoc \- manage versioned snapshots of collections of files
@@ -164,6 +164,16 @@ is a comma-separated list of the snapshot IDs in database
 .B «db1name»
 to be copied to
 .BR «db2name» .
+
+.TP
+.B copyfilterse «db1name» «db2name»
+copies the filter rules from database
+.B «db1name»
+to
+database
+.BR «db2name» ,
+replacing any filters present in the latter. Both databases must have
+filtering in effect.
 
 .SS COMMON OPTIONS
 

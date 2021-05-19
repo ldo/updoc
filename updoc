@@ -1331,6 +1331,52 @@ def cmd_copy(args, opts) :
     db2.close()
 #end cmd_copy
 
+def cmd_copyfilters(args, opts) :
+    db1name, db2name = args
+    db1 = open_db(db1name, DB_OPEN.READONLY)
+    db2 = open_db(db2name, DB_OPEN.READWRITE)
+    if not has_filtering(db1) or not has_filtering(db2) :
+        raise getopt.GetoptError \
+          (
+            "both databases %s and %s must have filtering in effect" % (db1name, db2name)
+          )
+    #end if
+    cu2 = db2.cursor()
+    cu2.execute("begin transaction")
+    for table, fields in \
+        (
+            ("filter_rules", ("ordering", "action")),
+            ("filter_items", ("rule_ordering", "item_ordering", "pathspec")),
+        ) \
+    :
+        cu2.execute("delete from %s" % table)
+        field_names = ", ".join(fields)
+        for record in db_iter \
+          (
+            db1,
+                "select %(fields)s from %(table)s"
+            %
+                {"fields" : field_names, "table" : table}
+          ) \
+        :
+            cu2.execute \
+              (
+                    "insert into %(table)s(%(fields)s) values(%(values)s)"
+                %
+                    {
+                        "table" : table,
+                        "fields" : field_names,
+                        "values" : ", ".join(sqlite.format_sql_value(v) for v in record),
+                    }
+              )
+        #end for
+    #end for
+    cu2.execute("end transaction")
+    cu2.close()
+    db1.close()
+    db2.close()
+#end cmd_copyfilters
+
 recognized_commands = \
     {
 # key is command name, value is dictionary with following fields:
@@ -1483,6 +1529,15 @@ recognized_commands = \
                 "action" : cmd_copy,
                 "help_usage" : "«db1name» «snapid»[,«snapid»...] «db2name»",
                 "help_descr" : "copies the specified snapshots from one database to another",
+            },
+
+        "copyfilters" :
+            {
+                "args" : 2,
+                "opts" : (),
+                "action" : cmd_copyfilters,
+                "help_usage" : "«db1name» «db2name»",
+                "help_descr" : "copies filter rules from one database to another",
             },
 
     } # recognized_commands
