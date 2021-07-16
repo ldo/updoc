@@ -166,7 +166,7 @@ to be copied to
 .BR «db2name» .
 
 .TP
-.B copyfilterse «db1name» «db2name»
+.B copyfilters «db1name» «db2name»
 copies the filter rules from database
 .B «db1name»
 to
@@ -211,13 +211,13 @@ is specified.
 \-\- (for the
 .B restore
 command only) do the entire restoration into a temporary directory named
-.BR «basedir» -new,
+.BR «basedir»-new ,
 and when this is complete, the existing
 .B «basedir»
 and its contents are deleted and
-.BR «basedir» -new
+.B «basedir»-new
 is renamed to
-.BR «basedir».
+.BR «basedir» .
 
 .TP
 .B \-\-verbose|\-v
@@ -301,7 +301,7 @@ the base directory. Exclude files in any of those directories.
 Rules are applied in the given order to each file found; the last one that applies
 takes effect. If no rule applies to a file, it is omitted.
 
-When reading filter definitions from a file, lines beginning with “\#” are ignored
+When reading filter definitions from a file, lines beginning with “#” are ignored
 and can be used for comments. No filter entries are made in the database for such lines.
 
 .SH NOTES
