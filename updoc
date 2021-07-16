@@ -27,8 +27,8 @@ import apsw as sqlite
 # Useful stuff
 #-
 
-def format_timestamp(timestamp) :
-    return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(round(timestamp)))
+def format_timestamp_ns(timestamp_ns) :
+    return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(round(timestamp_ns / 1e9)))
 #end format_timestamp
 
 #+
@@ -133,13 +133,13 @@ snapshot_tables = \
             [
                 "id integer primary key autoincrement",
                 "comment varchar not null",
-                "timestamp double not null",
+                "timestamp_ns bigint not null",
             ],
         "files" :
             [
                 "snapshot_id integer not null", # = snapshots.id
                 "path varchar not null",
-                "timestamp double not null",
+                "timestamp_ns bigint not null",
                 "sha256hash varchar not null", # = file_blobs.sha256hash
                 "primary key (snapshot_id, path)",
             ],
@@ -565,7 +565,7 @@ def get_filespecs_to_save(basedir, filespecs) :
     #end if
     to_save = list \
       (
-        {"path" : f[len(basedir) + 1:], "timestamp" : info[f].st_mtime}
+        {"path" : f[len(basedir) + 1:], "timestamp_ns" : info[f].st_mtime_ns}
         for f in to_save
       )
     return to_save
@@ -588,8 +588,8 @@ def save_files(cu, snapid, basedir, to_save, exist_action, doit) :
               )
             cu.execute \
               (
-                    "insert or %(exist_action)s into files(snapshot_id, path, timestamp, sha256hash)"
-                    " values(%(snapid)d, %(path)s, %(timestamp)s, %(hash)s)"
+                    "insert or %(exist_action)s into files(snapshot_id, path, timestamp_ns, sha256hash)"
+                    " values(%(snapid)d, %(path)s, %(timestamp_ns)s, %(hash)s)"
                 %
                     {
                         "exist_action" :
@@ -600,7 +600,7 @@ def save_files(cu, snapid, basedir, to_save, exist_action, doit) :
                             }[exist_action],
                         "snapid" : snapid,
                         "path" : sqlite.format_sql_value(item["path"]),
-                        "timestamp" : str(item["timestamp"]),
+                        "timestamp_ns" : str(item["timestamp_ns"]),
                         "hash" : sqlite.format_sql_value(contents_hash),
                     }
               )
@@ -814,16 +814,16 @@ def cmd_list(args, opts) :
         iter_snaps = db_iter \
           (
             db,
-            "select id, comment, snapshots.timestamp, files.path, files.timestamp,"
+            "select id, comment, snapshots.timestamp_ns, files.path, files.timestamp_ns,"
             " length(file_blobs.contents) from"
             " snapshots left join files on snapshots.id = files.snapshot_id"
             " left join file_blobs on files.sha256hash = file_blobs.sha256hash"
-            " order by snapshots.timestamp, snapshots.id, files.path"
+            " order by snapshots.timestamp_ns, snapshots.id, files.path"
           )
         while True :
             snap = next(iter_snaps, None)
             if snap != None :
-                snap_id, comment, snap_timestamp, filepath, file_timestamp, file_size = snap
+                snap_id, comment, snap_timestamp_ns, filepath, file_timestamp_ns, file_size = snap
                 assert filepath == None or file_size != None
             else :
                 snap_id = None
@@ -838,7 +838,7 @@ def cmd_list(args, opts) :
                     sys.stdout.write("\n")
                 #end if
                 first = False
-                sys.stdout.write("* snap ID %d at %s\n" % (snap_id, format_timestamp(snap_timestamp)))
+                sys.stdout.write("* snap ID %d at %s\n" % (snap_id, format_timestamp_ns(snap_timestamp_ns)))
                 if len(comment) != 0 :
                     sys.stdout.write("  ")
                     sys.stdout.write(comment)
@@ -856,7 +856,7 @@ def cmd_list(args, opts) :
                     %
                         (
                             file_size,
-                            format_timestamp(file_timestamp),
+                            format_timestamp_ns(file_timestamp_ns),
                             filepath,
                         )
                   )
@@ -865,12 +865,12 @@ def cmd_list(args, opts) :
             #end if
         #end while
     else :
-        for id, comment, timestamp, nr_files in db_iter \
+        for id, comment, timestamp_ns, nr_files in db_iter \
           (
             db,
-            "select id, comment, snapshots.timestamp, count(*) from"
+            "select id, comment, snapshots.timestamp_ns, count(*) from"
             " snapshots left join files on snapshots.id = files.snapshot_id"
-            " group by snapshot_id order by snapshots.timestamp"
+            " group by snapshot_id order by snapshots.timestamp_ns"
           ) \
         :
             if first :
@@ -887,7 +887,7 @@ def cmd_list(args, opts) :
                 %
                     (
                         id,
-                        format_timestamp(timestamp),
+                        format_timestamp_ns(timestamp_ns),
                         nr_files,
                         comment,
                     )
@@ -926,7 +926,7 @@ def cmd_save(args, opts) :
                 info = os.lstat(childitem)
                 if stat.S_ISREG(info.st_mode) :
                     if filter_says_include(childname, rules) :
-                        result.append({"path" : childname, "timestamp" : info.st_mtime})
+                        result.append({"path" : childname, "timestamp_ns" : info.st_mtime_ns})
                     #end if
                 elif stat.S_ISDIR(info.st_mode) :
                     result.extend(get_files(childitem, childname))
@@ -944,13 +944,13 @@ def cmd_save(args, opts) :
     #end if
     cu = db.cursor()
     cu.execute("begin transaction")
-    snaptime = time.time()
+    snaptime_ns = time.clock_gettime_ns(time.CLOCK_REALTIME)
     if doit :
         cu.execute \
           (
-                "insert into snapshots(comment, timestamp) values(%s, %s)"
+                "insert into snapshots(comment, timestamp_ns) values(%s, %s)"
             %
-                (sqlite.format_sql_value(message), str(snaptime))
+                (sqlite.format_sql_value(message), str(snaptime_ns))
           )
         snapid = db_func(db, "last_insert_rowid")
     else :
@@ -1164,10 +1164,10 @@ def cmd_restore(args, opts) :
         use_destdir = destdir
     #end if
     nr_restored = 0
-    for childname, timestamp, contents in db_iter \
+    for childname, timestamp_ns, contents in db_iter \
       (
         db,
-            "select files.path, files.timestamp, file_blobs.contents from snapshots"
+            "select files.path, files.timestamp_ns, file_blobs.contents from snapshots"
             " inner join files on snapshots.id = files.snapshot_id left join"
             " file_blobs on files.sha256hash = file_blobs.sha256hash where snapshots.id = %d"
         %
@@ -1195,7 +1195,7 @@ def cmd_restore(args, opts) :
                 childfile.write(contents)
                 childfile.close()
                 if preserve_timestamps :
-                    os.utime(childpath, (timestamp, timestamp))
+                    os.utime(childpath, ns = (timestamp_ns, timestamp_ns))
                 #end if
             #end if
         #end if
@@ -1262,28 +1262,28 @@ def cmd_copy(args, opts) :
     nr_snaps = 0
     for srcsnapid in snapids :
         srcsnap = list(db_iter
-            (db1, "select comment, timestamp from snapshots where id = %d" % srcsnapid))
+            (db1, "select comment, timestamp_ns from snapshots where id = %d" % srcsnapid))
         if len(srcsnap) != 1 :
             raise getopt.GetoptError("no snapshot with ID %d in %s" % (srcsnapid, db1name))
         #end if
-        message, snaptime = srcsnap[0]
+        message, snaptime_ns = srcsnap[0]
         cu2 = db2.cursor()
         cu2.execute("begin transaction")
         cu2.execute \
           (
-                "insert into snapshots(comment, timestamp) values(%s, %s)"
+                "insert into snapshots(comment, timestamp_ns) values(%s, %s)"
             %
-                (sqlite.format_sql_value(message), str(snaptime))
+                (sqlite.format_sql_value(message), str(snaptime_ns))
           )
         dstsnapid = db_func(db2, "last_insert_rowid")
         if verbose :
             sys.stdout.write("* copy %s[%d] => %s[%d]\n" % (db1name, srcsnapid, db2name, dstsnapid))
         #end if
         nr_files = 0
-        for childname, timestamp, contents, contents_hash in db_iter \
+        for childname, timestamp_ns, contents, contents_hash in db_iter \
           (
             db1,
-                "select files.path, files.timestamp, file_blobs.contents, files.sha256hash"
+                "select files.path, files.timestamp_ns, file_blobs.contents, files.sha256hash"
                 " from snapshots inner join files on snapshots.id = files.snapshot_id"
                 " left join file_blobs on files.sha256hash = file_blobs.sha256hash"
                 " where snapshots.id = %d"
@@ -1306,13 +1306,13 @@ def cmd_copy(args, opts) :
               )
             cu2.execute \
               (
-                    "insert into files(snapshot_id, path, timestamp, sha256hash)"
+                    "insert into files(snapshot_id, path, timestamp_ns, sha256hash)"
                     " values(%d, %s, %s, %s)"
                 %
                     (
                         dstsnapid,
                         sqlite.format_sql_value(childname),
-                        str(timestamp),
+                        str(timestamp_ns),
                         sqlite.format_sql_value(contents_hash),
                     )
               )
