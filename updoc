@@ -1577,12 +1577,11 @@ def mainline() :
         long_opts
       )
     if type(cmd_entry["args"]) == tuple :
-        if \
-          (
+        if (
                 len(args) < cmd_entry["args"][0]
             or
                 len(args) > cmd_entry["args"][1]
-          ):
+          ) :
             raise getopt.GetoptError \
               (
                     "%s command needs %s args"
