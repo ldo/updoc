@@ -589,7 +589,7 @@ def save_files(cu, snapid, basedir, to_save, exist_action, doit) :
             cu.execute \
               (
                     "insert or %(exist_action)s into files(snapshot_id, path, timestamp_ns, sha256hash)"
-                    " values(%(snapid)d, %(path)s, %(timestamp_ns)s, %(hash)s)"
+                    " values(%(snapid)d, %(path)s, %(timestamp_ns)d, %(hash)s)"
                 %
                     {
                         "exist_action" :
@@ -600,7 +600,7 @@ def save_files(cu, snapid, basedir, to_save, exist_action, doit) :
                             }[exist_action],
                         "snapid" : snapid,
                         "path" : sqlite.format_sql_value(item["path"]),
-                        "timestamp_ns" : str(item["timestamp_ns"]),
+                        "timestamp_ns" : item["timestamp_ns"],
                         "hash" : sqlite.format_sql_value(contents_hash),
                     }
               )
@@ -948,9 +948,9 @@ def cmd_save(args, opts) :
     if doit :
         cu.execute \
           (
-                "insert into snapshots(comment, timestamp_ns) values(%s, %s)"
+                "insert into snapshots(comment, timestamp_ns) values(%s, %d)"
             %
-                (sqlite.format_sql_value(message), str(snaptime_ns))
+                (sqlite.format_sql_value(message), snaptime_ns)
           )
         snapid = db_func(db, "last_insert_rowid")
     else :
@@ -1271,9 +1271,9 @@ def cmd_copy(args, opts) :
         cu2.execute("begin transaction")
         cu2.execute \
           (
-                "insert into snapshots(comment, timestamp_ns) values(%s, %s)"
+                "insert into snapshots(comment, timestamp_ns) values(%s, %d)"
             %
-                (sqlite.format_sql_value(message), str(snaptime_ns))
+                (sqlite.format_sql_value(message), snaptime_ns)
           )
         dstsnapid = db_func(db2, "last_insert_rowid")
         if verbose :
@@ -1307,12 +1307,12 @@ def cmd_copy(args, opts) :
             cu2.execute \
               (
                     "insert into files(snapshot_id, path, timestamp_ns, sha256hash)"
-                    " values(%d, %s, %s, %s)"
+                    " values(%d, %s, %d, %s)"
                 %
                     (
                         dstsnapid,
                         sqlite.format_sql_value(childname),
-                        str(timestamp_ns),
+                        timestamp_ns,
                         sqlite.format_sql_value(contents_hash),
                     )
               )
